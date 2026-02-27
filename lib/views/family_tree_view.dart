@@ -45,41 +45,32 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
 
           return Stack(
             children: [
-              // Background Grid
+              // 1. 底层：Background Grid
               Positioned.fill(child: CustomPaint(painter: GridPainter())),
 
-              // Dynamic Tree View
+              // 2. 中层：Dynamic Tree View (交互层)
               Positioned.fill(
-                // 占满全屏，确保手势随处可用
                 child: InteractiveViewer(
-                  // 1. 允许无限外扩的边界
-                  boundaryMargin: const EdgeInsets.all(2000),
-                  minScale: 0.1,
-                  maxScale: 2.0,
-                  // 2. 初始位置：我们将内容放在一个巨大的 Container 里
+                  constrained: false,
+                  boundaryMargin: const EdgeInsets.all(10000),
+                  minScale: 0.05,
+                  maxScale: 3.0,
+                  // --- 核心手术区：移除 OverflowBox，改用 Center ---
                   child: Container(
-                    width: 5000, // 设定一个 5000 像素宽的虚拟空间
-                    height: 5000, // 设定一个 5000 像素高的虚拟空间
-                    color: Colors.transparent, // 必须透明，否则背景网格看不见
-                    child: OverflowBox(
-                      // 允许内部内容超出，不受父级约束
-                      minWidth: 0,
-                      maxWidth: double.infinity,
-                      minHeight: 0,
-                      maxHeight: double.infinity,
-                      child: Column(
-                        mainAxisAlignment:
-                            MainAxisAlignment.center, // 让家谱始终处于这 5000 像素的中心
-                        children: sortedGenKeys.map((gen) {
-                          return _buildGenerationRow(gen, generations[gen]!);
-                        }).toList(),
-                      ),
+                    // 给图谱外围加一点基础的内边距，防止贴边
+                    padding: const EdgeInsets.all(100), 
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min, // 紧凑排列
+                      children: sortedGenKeys.map((gen) {
+                        return _buildGenerationRow(gen, generations[gen]!);
+                      }).toList(),
                     ),
                   ),
                 ),
               ),
 
-              // Sidebar
+              // 3. 顶层：Sidebar (操作层)
               if (latestSelectedPerson != null) // 使用最新获取的对象
                 Positioned(
                   right: 0,
