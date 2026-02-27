@@ -33,9 +33,9 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
         listenable: widget.controller,
         builder: (context, child) {
           final centerPerson = widget.controller.centerPerson;
-          final selectedPerson = widget.controller.selectedPerson;
+          final selectedId = widget.controller.selectedPerson?.id;
+          final latestSelectedPerson = selectedId != null ? widget.controller.getPerson(selectedId) : null;
           final generations = widget.controller.calculateGenerations();
-
           if (centerPerson == null) {
             return const Center(child: Text('暂无数据'));
           }
@@ -80,23 +80,25 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
               ),
 
               // Sidebar
-              if (selectedPerson != null)
+              if (latestSelectedPerson != null) // 使用最新获取的对象
                 Positioned(
                   right: 0,
                   top: 0,
                   bottom: 0,
                   child: PersonDetailsSidebar(
-                    person: selectedPerson,
+                    person: latestSelectedPerson, // 传入最新的引用
                     controller: widget.controller,
                     onClose: () => widget.controller.clearSelection(),
                     onAddParent: () =>
-                        _showAddParentDialog(context, selectedPerson.id),
+                        _showAddParentDialog(context, latestSelectedPerson.id),
                     onAddChild: () =>
-                        _showAddChildDialog(context, selectedPerson.id),
+                        _showAddChildDialog(context, latestSelectedPerson.id),
                     onEdit: () =>
-                        _showEditPersonDialog(context, selectedPerson),
-                    onDelete: () =>
-                        _showDeleteConfirmation(context, selectedPerson.id),
+                        _showEditPersonDialog(context, latestSelectedPerson),
+                    onDelete: () => _showDeleteConfirmation(
+                      context,
+                      latestSelectedPerson.id,
+                    ),
                   ),
                 ),
             ],

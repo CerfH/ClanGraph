@@ -165,12 +165,20 @@ class FamilyController extends ChangeNotifier {
     _people['root'] = root;
   }
 
-  // Add Parent
+  // 替换 addParent 方法：实现自动配偶识别
   void addParent(String childId, String name, String relationship, String bio, String gender) {
     final child = _people[childId];
     if (child == null) return;
 
     final newId = DateTime.now().millisecondsSinceEpoch.toString();
+    
+    // --- 自动配偶探测逻辑 ---
+    String? existingParentId;
+    if (child.parents.isNotEmpty) {
+      existingParentId = child.parents.first; // 已经有一个家长了
+    }
+
+    // 1. 创建新家长
     final parent = Person(
       id: newId,
       name: name,
@@ -178,13 +186,27 @@ class FamilyController extends ChangeNotifier {
       gender: gender,
       bio: bio,
       children: [childId],
+      spouse: existingParentId, // 如果有旧家长，直接指向
     );
-
     _people[newId] = parent;
 
-    // Update child's parents list
-    // We need to create a new Person object because fields are final
-    final updatedChild = Person(
+    // 2. 如果存在旧家长，给旧家长也补上配偶指针
+    if (existingParentId != null) {
+      final oldParent = _people[existingParentId]!;
+      _people[existingParentId] = Person(
+        id: oldParent.id,
+        name: oldParent.name,
+        relationship: oldParent.relationship,
+        gender: oldParent.gender,
+        bio: oldParent.bio,
+        parents: oldParent.parents,
+        children: oldParent.children,
+        spouse: newId, // 指向新来的
+      );
+    }
+
+    // 3. 更新孩子
+    _people[childId] = Person(
       id: child.id,
       name: child.name,
       relationship: child.relationship,
@@ -194,10 +216,9 @@ class FamilyController extends ChangeNotifier {
       children: child.children,
       spouse: child.spouse,
     );
-    _people[childId] = updatedChild;
 
     notifyListeners();
-    saveToDisk(); // <--- 每次数据变化后，同步保存到硬盘
+    saveToDisk();
   }
 
   // Add Child

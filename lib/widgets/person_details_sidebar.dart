@@ -58,7 +58,7 @@ class PersonDetailsSidebar extends StatelessWidget {
                 ],
               ),
             ),
-            
+
             // 下方内容区域设为可滚动
             Expanded(
               child: SingleChildScrollView(
@@ -85,9 +85,9 @@ class PersonDetailsSidebar extends StatelessWidget {
                     Center(
                       child: Text(
                         person!.name,
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontSize: 24,
-                        ),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.headlineMedium?.copyWith(fontSize: 24),
                       ),
                     ),
                     Center(
@@ -101,7 +101,7 @@ class PersonDetailsSidebar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 32),
-                    
+
                     // --- 基础信息区 ---
                     _buildInfoSection('备注', person!.bio),
                     const SizedBox(height: 24),
@@ -129,13 +129,25 @@ class PersonDetailsSidebar extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildRelationRow('配偶', _getSpouseName(person!, controller)),
+                          _buildRelationRow(
+                            '配偶',
+                            _getSpouseName(person!, controller),
+                          ),
                           const SizedBox(height: 12),
-                          _buildRelationRow('父母', _getParentNames(person!, controller)),
+                          _buildRelationRow(
+                            '父母',
+                            _getParentNames(person!, controller),
+                          ),
                           const SizedBox(height: 12),
-                          _buildRelationRow('子女', _getChildrenNames(person!, controller)),
+                          _buildRelationRow(
+                            '子女',
+                            _getChildrenNames(person!, controller),
+                          ),
                           const SizedBox(height: 12),
-                          _buildRelationRow('兄弟姐妹', _getSiblingNames(person!, controller)),
+                          _buildRelationRow(
+                            '兄弟姐妹',
+                            _getSiblingNames(person!, controller),
+                          ),
                         ],
                       ),
                     ),
@@ -143,7 +155,7 @@ class PersonDetailsSidebar extends StatelessWidget {
 
                     const Divider(color: Colors.white24),
                     const SizedBox(height: 16),
-                    
+
                     // --- 操作区 ---
                     const Text(
                       '操作',
@@ -155,9 +167,24 @@ class PersonDetailsSidebar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _buildActionButton(context, icon: Icons.person_add, label: '添加父母', onTap: onAddParent),
-                    _buildActionButton(context, icon: Icons.child_care, label: '添加子女', onTap: onAddChild),
-                    _buildActionButton(context, icon: Icons.edit, label: '编辑信息', onTap: onEdit),
+                    _buildActionButton(
+                      context,
+                      icon: Icons.person_add,
+                      label: '添加父母',
+                      onTap: onAddParent,
+                    ),
+                    _buildActionButton(
+                      context,
+                      icon: Icons.child_care,
+                      label: '添加子女',
+                      onTap: onAddChild,
+                    ),
+                    _buildActionButton(
+                      context,
+                      icon: Icons.edit,
+                      label: '编辑信息',
+                      onTap: onEdit,
+                    ),
                     if (person!.id != 'root')
                       _buildActionButton(
                         context,
@@ -192,7 +219,11 @@ class PersonDetailsSidebar extends StatelessWidget {
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ],
@@ -225,7 +256,13 @@ class PersonDetailsSidebar extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButton(BuildContext context, {required IconData icon, required String label, required VoidCallback onTap, bool isDestructive = false}) {
+  Widget _buildActionButton(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool isDestructive = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: Material(
@@ -236,14 +273,28 @@ class PersonDetailsSidebar extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              border: Border.all(color: isDestructive ? Colors.red.withValues(alpha: 0.5) : AppTheme.minimalistBlue),
+              border: Border.all(
+                color: isDestructive
+                    ? Colors.red.withValues(alpha: 0.5)
+                    : AppTheme.minimalistBlue,
+              ),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               children: [
-                Icon(icon, size: 20, color: isDestructive ? Colors.redAccent : Colors.white70),
+                Icon(
+                  icon,
+                  size: 20,
+                  color: isDestructive ? Colors.redAccent : Colors.white70,
+                ),
                 const SizedBox(width: 12),
-                Text(label, style: TextStyle(color: isDestructive ? Colors.redAccent : Colors.white, fontWeight: FontWeight.w500)),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: isDestructive ? Colors.redAccent : Colors.white,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
           ),
@@ -252,35 +303,87 @@ class PersonDetailsSidebar extends StatelessWidget {
     );
   }
 
-  // --- 辅助方法：通过 ID 查真实姓名 ---
   String _getSpouseName(Person p, FamilyController c) {
-    if (p.spouse == null) return '暂无';
-    return c.getPerson(p.spouse!)?.name ?? '未知';
+    final Set<String> spouses = {};
+    for (var childId in p.children) {
+      final child = c.getPerson(childId);
+      if (child != null) {
+        for (var parentId in child.parents) {
+          if (parentId != p.id) {
+            final spouse = c.getPerson(parentId);
+            if (spouse != null) spouses.add(spouse.name);
+          }
+        }
+      }
+    }
+    return spouses.isEmpty ? '暂无' : spouses.join('、');
   }
 
   String _getParentNames(Person p, FamilyController c) {
-    if (p.parents.isEmpty) return '暂无';
-    final names = p.parents.map((id) => c.getPerson(id)?.name ?? '').where((n) => n.isNotEmpty).toList();
-    return names.isEmpty ? '暂无' : names.join('、');
+    final Set<String> parentNames = {};
+    // 先加直接关联的父母
+    for (var id in p.parents) {
+      final parent = c.getPerson(id);
+      if (parent != null) {
+        parentNames.add(parent.name);
+        // 关键：顺便把父母的配偶也算进来（解决舅舅只有外婆没有外公的问题）
+        for (var spouseChildId in parent.children) {
+           final spouseChild = c.getPerson(spouseChildId);
+           if (spouseChild != null) {
+             for (var otherParentId in spouseChild.parents) {
+               final otherParent = c.getPerson(otherParentId);
+               if (otherParent != null) parentNames.add(otherParent.name);
+             }
+           }
+        }
+      }
+    }
+    return parentNames.isEmpty ? '暂无' : parentNames.join('、');
   }
 
   String _getChildrenNames(Person p, FamilyController c) {
-    if (p.children.isEmpty) return '暂无';
-    final names = p.children.map((id) => c.getPerson(id)?.name ?? '').where((n) => n.isNotEmpty).toList();
-    return names.isEmpty ? '暂无' : names.join('、');
+    final Set<String> allChildrenNames = {};
+    // 自己的孩子
+    for (var id in p.children) {
+      final child = c.getPerson(id);
+      if (child != null) allChildrenNames.add(child.name);
+    }
+    // 探测配偶的孩子（解决配偶的孩子也是我的孩子）
+    for (var childId in p.children) {
+      final child = c.getPerson(childId);
+      if (child != null) {
+        for (var parentId in child.parents) {
+          if (parentId != p.id) {
+            final spouse = c.getPerson(parentId);
+            if (spouse != null) {
+              for (var sChildId in spouse.children) {
+                final sChild = c.getPerson(sChildId);
+                if (sChild != null) allChildrenNames.add(sChild.name);
+              }
+            }
+          }
+        }
+      }
+    }
+    return allChildrenNames.isEmpty ? '暂无' : allChildrenNames.join('、');
   }
 
+  // 2. 动态找兄弟姐妹：寻找拥有至少一个共同父母的人
   String _getSiblingNames(Person p, FamilyController c) {
     if (p.parents.isEmpty) return '暂无';
-    final parent = c.getPerson(p.parents.first);
-    if (parent == null || parent.children.length <= 1) return '暂无';
     
-    final siblingNames = parent.children
-        .where((id) => id != p.id)
-        .map((id) => c.getPerson(id)?.name ?? '')
-        .where((n) => n.isNotEmpty)
-        .toList();
-    
+    final Set<String> siblingNames = {};
+    for (var parentId in p.parents) {
+      final parent = c.getPerson(parentId);
+      if (parent != null) {
+        for (var childId in parent.children) {
+          if (childId != p.id) {
+            final sibling = c.getPerson(childId);
+            if (sibling != null) siblingNames.add(sibling.name);
+          }
+        }
+      }
+    }
     return siblingNames.isEmpty ? '暂无' : siblingNames.join('、');
   }
 }

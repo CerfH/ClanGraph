@@ -16,7 +16,7 @@ class PersonNodeWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return InkWell( // 改用 InkWell，它在 InteractiveViewer 里的命中测试通常比 GestureDetector 更稳
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
