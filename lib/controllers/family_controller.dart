@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import '../models/person.dart';
+import 'package:clangraph/models/person.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FamilyController extends ChangeNotifier {
   // Using a Map for O(1) access by ID
@@ -7,8 +9,39 @@ class FamilyController extends ChangeNotifier {
   final String _centerPersonId = 'root';
   String? _selectedPersonId;
 
+  // --- 插入开始：持久化核心逻辑 ---
+  static const String _storageKey = 'family_data_v1';
+
+  // 1. 从硬盘读取数据
+  Future<void> loadFromDisk() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? encodedData = prefs.getString(_storageKey);
+    
+    if (encodedData != null) {
+      final Map<String, dynamic> decodedData = json.decode(encodedData);
+      _people.clear();
+      decodedData.forEach((key, value) {
+        // 这里依赖你 person.dart 里写好的 fromMap 方法
+        _people[key] = Person.fromMap(Map<String, dynamic>.from(value));
+      });
+      notifyListeners(); // 数据加载完，通知界面刷新
+    }
+  }
+
+  // 2. 将数据保存到硬盘
+  Future<void> saveToDisk() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String encodedData = json.encode(
+      // 这里依赖你 person.dart 里写好的 toMap 方法
+      _people.map((key, value) => MapEntry(key, value.toMap())),
+    );
+    await prefs.setString(_storageKey, encodedData);
+  }
+  // --- 插入结束 ---
+
   FamilyController() {
     _initData();
+    loadFromDisk();
   }
 
   // Getters
@@ -164,6 +197,7 @@ class FamilyController extends ChangeNotifier {
     _people[childId] = updatedChild;
 
     notifyListeners();
+    saveToDisk(); // <--- 每次数据变化后，同步保存到硬盘
   }
 
   // Add Child
@@ -197,6 +231,7 @@ class FamilyController extends ChangeNotifier {
     _people[parentId] = updatedParent;
 
     notifyListeners();
+    saveToDisk(); // <--- 每次数据变化后，同步保存到硬盘
   }
 
   // Update Person
@@ -216,6 +251,7 @@ class FamilyController extends ChangeNotifier {
     );
     _people[id] = updatedPerson;
     notifyListeners();
+    saveToDisk(); // <--- 每次数据变化后，同步保存到硬盘
   }
 
   // Delete Person (Only leaves)
@@ -267,6 +303,7 @@ class FamilyController extends ChangeNotifier {
       _selectedPersonId = null;
     }
     notifyListeners();
+    saveToDisk();
   }
 }
 

@@ -25,14 +25,8 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
         elevation: 0,
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.share),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {},
-          ),
+          IconButton(icon: const Icon(Icons.share), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.settings), onPressed: () {}),
         ],
       ),
       body: ListenableBuilder(
@@ -52,26 +46,34 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
           return Stack(
             children: [
               // Background Grid
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: GridPainter(),
-                ),
-              ),
-              
+              Positioned.fill(child: CustomPaint(painter: GridPainter())),
+
               // Dynamic Tree View
-              Center(
+              Positioned.fill(
+                // 占满全屏，确保手势随处可用
                 child: InteractiveViewer(
-                  boundaryMargin: const EdgeInsets.all(double.infinity),
+                  // 1. 允许无限外扩的边界
+                  boundaryMargin: const EdgeInsets.all(2000),
                   minScale: 0.1,
                   maxScale: 2.0,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.vertical,
-                    padding: const EdgeInsets.all(40),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: sortedGenKeys.map((gen) {
-                        return _buildGenerationRow(gen, generations[gen]!);
-                      }).toList(),
+                  // 2. 初始位置：我们将内容放在一个巨大的 Container 里
+                  child: Container(
+                    width: 5000, // 设定一个 5000 像素宽的虚拟空间
+                    height: 5000, // 设定一个 5000 像素高的虚拟空间
+                    color: Colors.transparent, // 必须透明，否则背景网格看不见
+                    child: OverflowBox(
+                      // 允许内部内容超出，不受父级约束
+                      minWidth: 0,
+                      maxWidth: double.infinity,
+                      minHeight: 0,
+                      maxHeight: double.infinity,
+                      child: Column(
+                        mainAxisAlignment:
+                            MainAxisAlignment.center, // 让家谱始终处于这 5000 像素的中心
+                        children: sortedGenKeys.map((gen) {
+                          return _buildGenerationRow(gen, generations[gen]!);
+                        }).toList(),
+                      ),
                     ),
                   ),
                 ),
@@ -86,10 +88,14 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
                   child: PersonDetailsSidebar(
                     person: selectedPerson,
                     onClose: () => widget.controller.clearSelection(),
-                    onAddParent: () => _showAddParentDialog(context, selectedPerson.id),
-                    onAddChild: () => _showAddChildDialog(context, selectedPerson.id),
-                    onEdit: () => _showEditPersonDialog(context, selectedPerson),
-                    onDelete: () => _showDeleteConfirmation(context, selectedPerson.id),
+                    onAddParent: () =>
+                        _showAddParentDialog(context, selectedPerson.id),
+                    onAddChild: () =>
+                        _showAddChildDialog(context, selectedPerson.id),
+                    onEdit: () =>
+                        _showEditPersonDialog(context, selectedPerson),
+                    onDelete: () =>
+                        _showDeleteConfirmation(context, selectedPerson.id),
                   ),
                 ),
             ],
@@ -113,21 +119,25 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
             ),
           ),
         ),
-        
+
         // People Row
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            children: people.map((p) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: _buildNode(p),
-            )).toList(),
+            children: people
+                .map(
+                  (p) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: _buildNode(p),
+                  ),
+                )
+                .toList(),
           ),
         ),
-        
+
         // Connector Line (only if not the last generation)
-        // Note: In this simplified view, we just add spacing. 
+        // Note: In this simplified view, we just add spacing.
         // Real connecting lines between specific parents/children would require a much more complex layout engine.
         const SizedBox(height: 40),
       ],
@@ -174,7 +184,13 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
         initialBio: person.bio,
         initialGender: person.gender,
         onSubmit: (name, relationship, bio, gender) {
-          widget.controller.updatePerson(person.id, name, relationship, bio, gender);
+          widget.controller.updatePerson(
+            person.id,
+            name,
+            relationship,
+            bio,
+            gender,
+          );
         },
       ),
     );
@@ -186,7 +202,10 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surfaceGrey,
         title: const Text('确认删除', style: TextStyle(color: Colors.white)),
-        content: const Text('确定要删除该成员吗？此操作无法撤销。', style: TextStyle(color: Colors.white70)),
+        content: const Text(
+          '确定要删除该成员吗？此操作无法撤销。',
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -207,15 +226,17 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
   Widget _buildNode(Person person) {
     final isCenter = person.id == 'root';
     return Container(
-      decoration: isCenter ? BoxDecoration(
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.minimalistBlue.withValues(alpha: 0.3),
-            blurRadius: 20,
-            spreadRadius: 5,
-          )
-        ],
-      ) : null,
+      decoration: isCenter
+          ? BoxDecoration(
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.minimalistBlue.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  spreadRadius: 5,
+                ),
+              ],
+            )
+          : null,
       child: PersonNodeWidget(
         person: person,
         isSelected: widget.controller.selectedPerson?.id == person.id,
