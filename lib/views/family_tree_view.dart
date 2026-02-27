@@ -87,6 +87,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
                   bottom: 0,
                   child: PersonDetailsSidebar(
                     person: selectedPerson,
+                    controller: widget.controller,
                     onClose: () => widget.controller.clearSelection(),
                     onAddParent: () =>
                         _showAddParentDialog(context, selectedPerson.id),

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/person.dart';
 import '../theme/app_theme.dart';
+import '../controllers/family_controller.dart'; // 必须引入 Controller
 
 class PersonDetailsSidebar extends StatelessWidget {
   final Person? person;
+  final FamilyController controller; // 增加 controller 属性
   final VoidCallback onClose;
   final VoidCallback onAddParent;
   final VoidCallback onAddChild;
@@ -13,6 +15,7 @@ class PersonDetailsSidebar extends StatelessWidget {
   const PersonDetailsSidebar({
     super.key,
     required this.person,
+    required this.controller, // 构造函数要求传入
     required this.onClose,
     required this.onAddParent,
     required this.onAddChild,
@@ -28,14 +31,13 @@ class PersonDetailsSidebar extends StatelessWidget {
 
     return Container(
       width: 320,
-      // 移除 Container 的高度和 padding 约束，由内部决定
       decoration: BoxDecoration(
         color: AppTheme.surfaceGrey.withValues(alpha: 0.95),
       ),
       child: SafeArea(
         child: Column(
           children: [
-            // 顶部的固定标题栏（不随滚动消失，方便操作）
+            // 顶部的固定标题栏
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
               child: Row(
@@ -60,7 +62,7 @@ class PersonDetailsSidebar extends StatelessWidget {
             // 下方内容区域设为可滚动
             Expanded(
               child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(), // 增加 iOS 的弹性滚动感
+                physics: const BouncingScrollPhysics(),
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -99,13 +101,50 @@ class PersonDetailsSidebar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 32),
+                    
+                    // --- 基础信息区 ---
                     _buildInfoSection('备注', person!.bio),
                     const SizedBox(height: 24),
                     _buildInfoSection('性别', person!.gender),
                     const SizedBox(height: 32),
+
+                    // --- 新增：动态关系网络展示区 ---
+                    const Text(
+                      '亲缘关系',
+                      style: TextStyle(
+                        color: AppTheme.electricBlue,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.03),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildRelationRow('配偶', _getSpouseName(person!, controller)),
+                          const SizedBox(height: 12),
+                          _buildRelationRow('父母', _getParentNames(person!, controller)),
+                          const SizedBox(height: 12),
+                          _buildRelationRow('子女', _getChildrenNames(person!, controller)),
+                          const SizedBox(height: 12),
+                          _buildRelationRow('兄弟姐妹', _getSiblingNames(person!, controller)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+
                     const Divider(color: Colors.white24),
                     const SizedBox(height: 16),
-                    // 操作区
+                    
+                    // --- 操作区 ---
                     const Text(
                       '操作',
                       style: TextStyle(
@@ -127,7 +166,6 @@ class PersonDetailsSidebar extends StatelessWidget {
                         onTap: onDelete,
                         isDestructive: true,
                       ),
-                    // 底部留白，防止被系统横条遮挡
                     const SizedBox(height: 40),
                   ],
                 ),
@@ -136,6 +174,28 @@ class PersonDetailsSidebar extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  // --- 关系行 UI 辅助组件 ---
+  Widget _buildRelationRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 60,
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+        ),
+      ],
     );
   }
 
@@ -165,13 +225,7 @@ class PersonDetailsSidebar extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButton(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool isDestructive = false,
-  }) {
+  Widget _buildActionButton(BuildContext context, {required IconData icon, required String label, required VoidCallback onTap, bool isDestructive = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: Material(
@@ -182,31 +236,51 @@ class PersonDetailsSidebar extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              border: Border.all(
-                color: isDestructive ? Colors.red.withValues(alpha: 0.5) : AppTheme.minimalistBlue,
-              ),
+              border: Border.all(color: isDestructive ? Colors.red.withValues(alpha: 0.5) : AppTheme.minimalistBlue),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               children: [
-                Icon(
-                  icon,
-                  size: 20,
-                  color: isDestructive ? Colors.redAccent : Colors.white70,
-                ),
+                Icon(icon, size: 20, color: isDestructive ? Colors.redAccent : Colors.white70),
                 const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: isDestructive ? Colors.redAccent : Colors.white,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(label, style: TextStyle(color: isDestructive ? Colors.redAccent : Colors.white, fontWeight: FontWeight.w500)),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  // --- 辅助方法：通过 ID 查真实姓名 ---
+  String _getSpouseName(Person p, FamilyController c) {
+    if (p.spouse == null) return '暂无';
+    return c.getPerson(p.spouse!)?.name ?? '未知';
+  }
+
+  String _getParentNames(Person p, FamilyController c) {
+    if (p.parents.isEmpty) return '暂无';
+    final names = p.parents.map((id) => c.getPerson(id)?.name ?? '').where((n) => n.isNotEmpty).toList();
+    return names.isEmpty ? '暂无' : names.join('、');
+  }
+
+  String _getChildrenNames(Person p, FamilyController c) {
+    if (p.children.isEmpty) return '暂无';
+    final names = p.children.map((id) => c.getPerson(id)?.name ?? '').where((n) => n.isNotEmpty).toList();
+    return names.isEmpty ? '暂无' : names.join('、');
+  }
+
+  String _getSiblingNames(Person p, FamilyController c) {
+    if (p.parents.isEmpty) return '暂无';
+    final parent = c.getPerson(p.parents.first);
+    if (parent == null || parent.children.length <= 1) return '暂无';
+    
+    final siblingNames = parent.children
+        .where((id) => id != p.id)
+        .map((id) => c.getPerson(id)?.name ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+    
+    return siblingNames.isEmpty ? '暂无' : siblingNames.join('、');
   }
 }
