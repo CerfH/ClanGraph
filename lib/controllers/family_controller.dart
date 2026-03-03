@@ -49,6 +49,28 @@ class FamilyController extends ChangeNotifier {
   Person? get selectedPerson => _selectedPersonId != null ? _people[_selectedPersonId] : null;
   List<Person> get allPeople => _people.values.toList();
 
+  List<String> get dynamicEventHistory {
+    // 1. 收集所有人的所有礼金记录
+    final allRecords = _people.values
+        .expand((p) => p.giftHistory)
+        .toList();
+
+    // 2. 按日期倒序排序（最新的在前面）
+    allRecords.sort((a, b) => b.date.compareTo(a.date));
+
+    // 3. 去重并取前10个
+    final uniqueEvents = <String>{};
+    final result = <String>[];
+
+    for (var record in allRecords) {
+      if (uniqueEvents.add(record.event)) {
+        result.add(record.event);
+        if (result.length >= 10) break;
+      }
+    }
+    return result;
+  }
+
   // Actions
   void selectPerson(String id) {
     _selectedPersonId = id;

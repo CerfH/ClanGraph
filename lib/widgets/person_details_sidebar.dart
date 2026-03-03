@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/person.dart';
 import '../theme/app_theme.dart';
 import '../controllers/family_controller.dart'; // 必须引入 Controller
+import 'gift_record_dialog.dart'; // 引入礼金记录弹窗
 
 class PersonDetailsSidebar extends StatelessWidget {
   final Person? person;
@@ -153,6 +154,44 @@ class PersonDetailsSidebar extends StatelessWidget {
                     ),
                     const SizedBox(height: 32),
 
+                    // --- 新增：礼金记录模块 ---
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          '礼金记录',
+                          style: TextStyle(
+                            color: AppTheme.electricBlue,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.add_circle_outline,
+                            color: AppTheme.electricBlue,
+                            size: 18,
+                          ),
+                          tooltip: '添加记录',
+                          constraints: const BoxConstraints(),
+                          padding: EdgeInsets.zero,
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => GiftRecordDialog(
+                                controller: controller,
+                                personId: person!.id,
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildGiftRecords(person!),
+                    const SizedBox(height: 32),
+
                     const Divider(color: Colors.white24),
                     const SizedBox(height: 16),
 
@@ -200,6 +239,71 @@ class PersonDetailsSidebar extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // --- 礼金记录模块 UI ---
+  Widget _buildGiftRecords(Person p) {
+    if (p.giftHistory.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: const Text(
+          '暂无记录',
+          style: TextStyle(color: Colors.white54, fontSize: 13),
+        ),
+      );
+    }
+
+    // 按日期倒序排序并取前3条
+    final sortedHistory = List.of(p.giftHistory)..sort((a, b) => b.date.compareTo(a.date));
+    final latestRecords = sortedHistory.take(3).toList();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: latestRecords.asMap().entries.map((entry) {
+          final record = entry.value;
+          final isLast = entry.key == latestRecords.length - 1;
+          
+          final dateStr = "${record.date.year}-${record.date.month.toString().padLeft(2, '0')}-${record.date.day.toString().padLeft(2, '0')}";
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: isLast ? 0 : 8.0),
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(fontSize: 13, height: 1.5),
+                children: [
+                  TextSpan(
+                    text: '[$dateStr] ',
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                  TextSpan(
+                    text: '${record.event} : ',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  TextSpan(
+                    text: '￥${record.amount.toStringAsFixed(0)}',
+                    style: const TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
