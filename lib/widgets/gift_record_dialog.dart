@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../controllers/family_controller.dart';
+import '../models/person.dart';
 
 class GiftRecordDialog extends StatefulWidget {
   final FamilyController controller;
   final String personId;
+  final GiftRecord? initialRecord; // For edit mode
 
   const GiftRecordDialog({
     super.key,
     required this.controller,
     required this.personId,
+    this.initialRecord,
   });
 
   @override
@@ -20,6 +23,20 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
   final _amountController = TextEditingController();
   final _eventController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  late DateTime _selectedDate;
+  bool _syncToSpouse = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialRecord != null) {
+      _amountController.text = widget.initialRecord!.amount.toStringAsFixed(0); // Assuming integer amount for display
+      _eventController.text = widget.initialRecord!.event;
+      _selectedDate = widget.initialRecord!.date;
+    } else {
+      _selectedDate = DateTime.now();
+    }
+  }
 
   @override
   void dispose() {
@@ -33,14 +50,65 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
       final amount = double.tryParse(_amountController.text) ?? 0.0;
       final event = _eventController.text;
 
-      widget.controller.addGiftRecord(widget.personId, amount, event);
+      if (widget.initialRecord != null) {
+        // Edit Mode
+        final updatedRecord = GiftRecord(
+          id: widget.initialRecord!.id,
+          amount: amount,
+          event: event,
+          date: _selectedDate,
+        );
+        widget.controller.updateGiftRecord(widget.personId, updatedRecord);
+      } else {
+        // Add Mode
+        widget.controller.addGiftRecord(widget.personId, amount, event, _selectedDate);
+
+        // Sync to spouse if checked
+        if (_syncToSpouse) {
+           final person = widget.controller.getPerson(widget.personId);
+           if (person != null && person.spouse != null) {
+             widget.controller.addGiftRecord(person.spouse!, amount, event, _selectedDate);
+           }
+        }
+      }
       Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2100),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.dark(
+              primary: AppTheme.electricBlue,
+              onPrimary: Colors.white,
+              surface: AppTheme.surfaceGrey,
+              onSurface: Colors.white,
+            ),
+            dialogBackgroundColor: AppTheme.surfaceGrey,
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedDate = picked;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final history = widget.controller.dynamicEventHistory;
+    final isEditMode = widget.initialRecord != null;
+    final person = widget.controller.getPerson(widget.personId);
+    final hasSpouse = person?.spouse != null;
 
     return Dialog(
       backgroundColor: AppTheme.surfaceGrey,
@@ -58,7 +126,7 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '添加礼金记录',
+                  isEditMode ? '编辑礼金记录' : '添加礼金记录',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -150,12 +218,64 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                         onSelected: (selected) {
                           setState(() {
                             _eventController.text = event;
+                            // Event Association Trigger
+                            final defaultDate = widget.controller.getEventDefaultDate(event);
+                            if (defaultDate != null) {
+                              _selectedDate = defaultDate;
+                            }
                           });
                         },
                       );
                     }).toList(),
                   ),
                 ],
+
+                const SizedBox(height: 16),
+
+                // Date Picker Row
+                InkWell(
+                  onTap: _pickDate,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.white24),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '日期: ${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        const Icon(Icons.calendar_today, color: AppTheme.electricBlue, size: 20),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Spouse Sync Checkbox (Only in Add mode and if spouse exists)
+                if (!isEditMode && hasSpouse)
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: _syncToSpouse,
+                        activeColor: AppTheme.electricBlue,
+                        onChanged: (val) {
+                          setState(() {
+                            _syncToSpouse = val ?? false;
+                          });
+                        },
+                      ),
+                      const Text(
+                        '同步记录至配偶',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
 
                 const SizedBox(height: 24),
                 

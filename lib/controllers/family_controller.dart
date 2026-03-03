@@ -282,7 +282,7 @@ class FamilyController extends ChangeNotifier {
   }
 
   // Add Gift Record
-  void addGiftRecord(String personId, double amount, String event) {
+  void addGiftRecord(String personId, double amount, String event, DateTime date) {
     final person = _people[personId];
     if (person == null) return;
 
@@ -290,7 +290,7 @@ class FamilyController extends ChangeNotifier {
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       amount: amount,
       event: event,
-      date: DateTime.now(),
+      date: date,
     );
 
     final updatedPerson = Person(
@@ -308,6 +308,72 @@ class FamilyController extends ChangeNotifier {
     _people[personId] = updatedPerson;
     notifyListeners();
     saveToDisk();
+  }
+
+  // Update Gift Record
+  void updateGiftRecord(String personId, GiftRecord record) {
+    final person = _people[personId];
+    if (person == null) return;
+
+    final updatedHistory = person.giftHistory.map((r) {
+      return r.id == record.id ? record : r;
+    }).toList();
+
+    final updatedPerson = Person(
+      id: person.id,
+      name: person.name,
+      relationship: person.relationship,
+      gender: person.gender,
+      bio: person.bio,
+      parents: person.parents,
+      children: person.children,
+      spouse: person.spouse,
+      giftHistory: updatedHistory,
+    );
+
+    _people[personId] = updatedPerson;
+    notifyListeners();
+    saveToDisk();
+  }
+
+  // Delete Gift Record
+  void deleteGiftRecord(String personId, String recordId) {
+    final person = _people[personId];
+    if (person == null) return;
+
+    final updatedHistory = person.giftHistory
+        .where((r) => r.id != recordId)
+        .toList();
+
+    final updatedPerson = Person(
+      id: person.id,
+      name: person.name,
+      relationship: person.relationship,
+      gender: person.gender,
+      bio: person.bio,
+      parents: person.parents,
+      children: person.children,
+      spouse: person.spouse,
+      giftHistory: updatedHistory,
+    );
+
+    _people[personId] = updatedPerson;
+    notifyListeners();
+    saveToDisk();
+  }
+
+  // Get Default Date for Event
+  DateTime? getEventDefaultDate(String eventName) {
+    final allRecords = _people.values
+        .expand((p) => p.giftHistory)
+        .where((r) => r.event == eventName)
+        .toList();
+
+    if (allRecords.isEmpty) return null;
+
+    // Sort by date descending to find the latest
+    allRecords.sort((a, b) => b.date.compareTo(a.date));
+    return allRecords.first.date;
   }
 
   // Update Person

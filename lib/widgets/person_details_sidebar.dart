@@ -189,7 +189,7 @@ class PersonDetailsSidebar extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    _buildGiftRecords(person!),
+                    _buildGiftRecords(context, person!),
                     const SizedBox(height: 32),
 
                     const Divider(color: Colors.white24),
@@ -244,7 +244,7 @@ class PersonDetailsSidebar extends StatelessWidget {
   }
 
   // --- 礼金记录模块 UI ---
-  Widget _buildGiftRecords(Person p) {
+  Widget _buildGiftRecords(BuildContext context, Person p) {
     if (p.giftHistory.isEmpty) {
       return Container(
         width: double.infinity,
@@ -267,7 +267,6 @@ class PersonDetailsSidebar extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(12),
@@ -281,29 +280,90 @@ class PersonDetailsSidebar extends StatelessWidget {
           
           final dateStr = "${record.date.year}-${record.date.month.toString().padLeft(2, '0')}-${record.date.day.toString().padLeft(2, '0')}";
 
-          return Padding(
-            padding: EdgeInsets.only(bottom: isLast ? 0 : 8.0),
-            child: RichText(
-              text: TextSpan(
-                style: const TextStyle(fontSize: 13, height: 1.5),
+          return Container(
+            decoration: isLast ? null : BoxDecoration(
+              border: Border(bottom: BorderSide(color: Colors.white10)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              child: Row(
                 children: [
-                  TextSpan(
-                    text: '[$dateStr] ',
-                    style: const TextStyle(color: Colors.white54),
+                  Expanded(
+                    child: RichText(
+                      text: TextSpan(
+                        style: const TextStyle(fontSize: 13, height: 1.5),
+                        children: [
+                          TextSpan(
+                            text: '[$dateStr] ',
+                            style: const TextStyle(color: Colors.white54),
+                          ),
+                          TextSpan(
+                            text: '${record.event} : ',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          TextSpan(
+                            text: '￥${record.amount.toStringAsFixed(0)}',
+                            style: const TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  TextSpan(
-                    text: '${record.event} : ',
-                    style: const TextStyle(color: Colors.white),
+                  // Edit Button
+                  IconButton(
+                    icon: const Icon(Icons.edit, size: 16, color: Colors.white38),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => GiftRecordDialog(
+                          controller: controller,
+                          personId: p.id,
+                          initialRecord: record,
+                        ),
+                      );
+                    },
                   ),
-                  TextSpan(
-                    text: '￥${record.amount.toStringAsFixed(0)}',
-                    style: const TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                  const SizedBox(width: 4),
+                  // Delete Button
+                  IconButton(
+                    icon: const Icon(Icons.delete, size: 16, color: Colors.redAccent),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                    onPressed: () {
+                      _showDeleteGiftConfirmDialog(context, p.id, record.id);
+                    },
                   ),
                 ],
               ),
             ),
           );
         }).toList(),
+      ),
+    );
+  }
+
+  void _showDeleteGiftConfirmDialog(BuildContext context, String personId, String recordId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surfaceGrey,
+        title: const Text('确认删除', style: TextStyle(color: Colors.white)),
+        content: const Text('确定要删除这条礼金记录吗？', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () {
+              controller.deleteGiftRecord(personId, recordId);
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
       ),
     );
   }
