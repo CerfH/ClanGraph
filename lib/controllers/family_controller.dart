@@ -158,9 +158,10 @@ class FamilyController extends ChangeNotifier {
       name: '我',
       relationship: '本人',
       gender: '男', // 默认性别
-      bio: '这是我，家族图谱的中心。',
+      bio: '这是本人',
       parents: [],
       children: [],
+      giftHistory: [],
     );
     _people['root'] = root;
   }
@@ -202,6 +203,7 @@ class FamilyController extends ChangeNotifier {
         parents: oldParent.parents,
         children: oldParent.children,
         spouse: newId, // 指向新来的
+        giftHistory: oldParent.giftHistory,
       );
     }
 
@@ -215,6 +217,7 @@ class FamilyController extends ChangeNotifier {
       parents: [...child.parents, newId],
       children: child.children,
       spouse: child.spouse,
+      giftHistory: child.giftHistory,
     );
 
     notifyListeners();
@@ -248,11 +251,41 @@ class FamilyController extends ChangeNotifier {
       parents: parent.parents,
       children: [...parent.children, newId],
       spouse: parent.spouse,
+      giftHistory: parent.giftHistory,
     );
     _people[parentId] = updatedParent;
 
     notifyListeners();
     saveToDisk(); // <--- 每次数据变化后，同步保存到硬盘
+  }
+
+  // Add Gift Record
+  void addGiftRecord(String personId, double amount, String event) {
+    final person = _people[personId];
+    if (person == null) return;
+
+    final newGift = GiftRecord(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      amount: amount,
+      event: event,
+      date: DateTime.now(),
+    );
+
+    final updatedPerson = Person(
+      id: person.id,
+      name: person.name,
+      relationship: person.relationship,
+      gender: person.gender,
+      bio: person.bio,
+      parents: person.parents,
+      children: person.children,
+      spouse: person.spouse,
+      giftHistory: [...person.giftHistory, newGift],
+    );
+
+    _people[personId] = updatedPerson;
+    notifyListeners();
+    saveToDisk();
   }
 
   // Update Person
@@ -269,6 +302,7 @@ class FamilyController extends ChangeNotifier {
       parents: person.parents,
       children: person.children,
       spouse: person.spouse,
+      giftHistory: person.giftHistory,
     );
     _people[id] = updatedPerson;
     notifyListeners();
@@ -295,6 +329,7 @@ class FamilyController extends ChangeNotifier {
           parents: parent.parents,
           children: parent.children.where((cid) => cid != id).toList(),
           spouse: parent.spouse,
+          giftHistory: parent.giftHistory,
         );
         _people[parentId] = updatedParent;
       }
@@ -313,6 +348,7 @@ class FamilyController extends ChangeNotifier {
           parents: child.parents.where((pid) => pid != id).toList(),
           children: child.children,
           spouse: child.spouse,
+          giftHistory: child.giftHistory,
         );
         _people[childId] = updatedChild;
       }
