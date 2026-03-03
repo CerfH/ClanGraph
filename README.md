@@ -35,3 +35,22 @@
    ```bash
    git clone [https://github.com/CerfH/ClanGraph.git](https://github.com/CerfH/ClanGraph.git)
    cd ClanGraph
+
+2. **安装依赖**:
+   ```bash
+   flutter pub get
+
+3. **运行项目**:
+   ```bash
+   flutter run
+
+## 📅 开发计划 (Roadmap)
+- [x] 核心家谱拓扑推导算法
+- [x] 基础 UI 框架与深空灰主题
+- [x] 人情往来数据模型与持久化存储
+- [ ] **Next Step**: 集成 `google_generative_ai` 开启视觉识别
+- [ ] 导出高清家族图谱海报功能
+- [ ] 智能称呼换算器（根据关系链自动生成标准称谓）
+
+## 🛡 隐私声明
+**ClanGraph 极其重视用户隐私**。所有家族成员姓名、备注及礼金数额均存储在用户设备本地，AI 识别过程遵循最小化权限原则，不会对用户数据进行云端建模。
