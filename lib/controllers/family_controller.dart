@@ -71,6 +71,24 @@ class FamilyController extends ChangeNotifier {
     return result;
   }
 
+  // AI Context Summary
+  String get aiContextSummary {
+    final List<Map<String, dynamic>> summaryList = _people.values.map((p) {
+      return {
+        'name': p.name,
+        'relation': p.relationship,
+        'gender': p.gender,
+        'bio': p.bio,
+        'gifts': p.giftHistory.map((g) => {
+          'event': g.event,
+          'amount': g.amount,
+          'date': g.date.toIso8601String().split('T')[0],
+        }).toList(),
+      };
+    }).toList();
+    return json.encode(summaryList);
+  }
+
   // Actions
   void selectPerson(String id) {
     _selectedPersonId = id;

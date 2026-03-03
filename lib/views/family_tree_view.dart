@@ -5,6 +5,7 @@ import '../widgets/person_node_widget.dart';
 import '../widgets/person_details_sidebar.dart';
 import '../widgets/person_dialog.dart';
 import '../theme/app_theme.dart';
+import 'ai_assistant_view.dart'; // 引入 AI 助手页面
 
 class FamilyTreeView extends StatefulWidget {
   final FamilyController controller;
@@ -16,6 +17,31 @@ class FamilyTreeView extends StatefulWidget {
 }
 
 class _FamilyTreeViewState extends State<FamilyTreeView> {
+  void _showAIAssistant() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.8,
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceGrey,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+          child: AIAssistantView(controller: widget.controller),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -95,6 +121,11 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
             ],
           );
         },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAIAssistant,
+        backgroundColor: AppTheme.electricBlue,
+        child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
       ),
     );
   }

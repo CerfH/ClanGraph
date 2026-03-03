@@ -89,8 +89,7 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
               onPrimary: Colors.white,
               surface: AppTheme.surfaceGrey,
               onSurface: Colors.white,
-            ),
-            dialogBackgroundColor: AppTheme.surfaceGrey,
+            ), dialogTheme: DialogThemeData(backgroundColor: AppTheme.surfaceGrey),
           ),
           child: child!,
         );
