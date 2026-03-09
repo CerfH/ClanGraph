@@ -35,18 +35,11 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   final List<File> _selectedImages = []; // 多图选择列表
   String _loadingText = '智谱 AI 正在思考中...';
 
-  // 自动吸底滚动控制
-  bool _shouldAutoScroll = true;
-  double _lastScrollOffset = 0;
-
   static const String _chatStorageKey = 'ai_chat_history_v2';
-  // 用户手动滚动阈值：距离底部超过 200px 视为手动查看历史消息
-  static const double _manualScrollThreshold = 200;
 
   @override
   void initState() {
     super.initState();
-    _setupScrollListener();
     _loadChatHistory();
   }
 
@@ -147,8 +140,8 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     }
   }
 
-  /// 相机连拍模式 - 拍完一张不退出，继续拍
-  Future<void> _takePictureInBurstMode() async {
+  /// 拍照选择
+  Future<void> _takePicture() async {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: ImageSource.camera,
@@ -161,7 +154,6 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         setState(() {
           _selectedImages.add(File(pickedFile.path));
         });
-        // 不退出，允许继续拍照
       }
     } catch (e) {
       if (mounted) {
@@ -204,7 +196,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             child: const Text('拍照', style: TextStyle(color: Colors.white)),
             onPressed: () {
               Navigator.pop(context);
-              _takePictureInBurstMode();
+              _takePicture();
             },
           ),
           CupertinoActionSheetAction(
@@ -462,54 +454,8 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     return 0.0;
   }
 
-  /// 设置滚动监听，检测用户手动滚动
-  void _setupScrollListener() {
-    _scrollController.addListener(() {
-      if (!_scrollController.hasClients) return;
-
-      final currentOffset = _scrollController.offset;
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      final distanceFromBottom = maxScroll - currentOffset;
-
-      // 如果用户向上滚动超过阈值，停止自动吸底
-      if (currentOffset < _lastScrollOffset && distanceFromBottom > _manualScrollThreshold) {
-        if (_shouldAutoScroll) {
-          setState(() {
-            _shouldAutoScroll = false;
-          });
-        }
-      }
-
-      // 如果用户滚动到底部附近，恢复自动吸底
-      if (distanceFromBottom < 50) {
-        if (!_shouldAutoScroll) {
-          setState(() {
-            _shouldAutoScroll = true;
-          });
-        }
-      }
-
-      _lastScrollOffset = currentOffset;
-    });
-  }
-
+  /// 滚动到底部（新消息时一律自动滑到底）
   void _scrollToBottom() {
-    if (!_shouldAutoScroll) return; // 用户手动查看历史消息时，不自动滚动
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  /// 强制滚动到底部（用于用户主动发送消息时）
-  void _forceScrollToBottom() {
-    _shouldAutoScroll = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -682,30 +628,6 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                               },
                             ),
                           ),
-                          // 继续拍照按钮
-                          GestureDetector(
-                            onTap: _takePictureInBurstMode,
-                            child: Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppTheme.electricBlue.withValues(alpha: 0.5)),
-                              ),
-                              child: const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.camera_alt, color: AppTheme.electricBlue, size: 24),
-                                  SizedBox(height: 4),
-                                  Text(
-                                    '继续拍',
-                                    style: TextStyle(color: AppTheme.electricBlue, fontSize: 11),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -837,14 +759,36 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     );
   }
 
+  /// 检查图片文件是否存在且有效
+  bool _isImageFileValid(String? path) {
+    if (path == null || path.isEmpty) return false;
+    try {
+      final file = File(path);
+      return file.existsSync();
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// 过滤有效的图片路径列表
+  List<String> _getValidImagePaths(List<dynamic>? paths) {
+    if (paths == null || paths.isEmpty) return [];
+    return paths
+        .where((p) => p is String && _isImageFileValid(p))
+        .cast<String>()
+        .toList();
+  }
+
   /// 构建消息气泡 - 支持长按复制、图片显示和 JSON 数据卡片
   Widget _buildMessageBubble(Map<String, dynamic> msg) {
     final isUser = msg['role'] == 'user';
     final content = msg['content']?.toString() ?? '';
     final isJsonData = msg['isJsonData'] == true || _detectJsonInContent(content);
-    // 支持单图和多图
+    // 支持单图和多图（过滤掉无效的图片路径）
     final imagePath = msg['imagePath']?.toString();
-    final imagePaths = msg['imagePaths'] as List<dynamic>?;
+    final rawImagePaths = msg['imagePaths'] as List<dynamic>?;
+    final validImagePaths = _getValidImagePaths(rawImagePaths);
+    final bool hasValidSingleImage = _isImageFileValid(imagePath);
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -858,10 +802,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             // 多图消息
-            if (imagePaths != null && imagePaths.isNotEmpty)
-              _buildMultiImagePreview(imagePaths.cast<String>()),
+            if (validImagePaths.isNotEmpty)
+              _buildMultiImagePreview(validImagePaths),
             // 单图消息（兼容旧数据）
-            if (imagePath != null && imagePaths == null)
+            if (hasValidSingleImage && rawImagePaths == null && imagePath != null)
               GestureDetector(
                 onTap: () => _showFullScreenImage(imagePath),
                 child: Container(
@@ -935,16 +879,16 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   void _showFullScreenImage(String imagePath) {
     showDialog(
       context: context,
+      barrierColor: Colors.black,
+      barrierDismissible: true,
       builder: (ctx) => GestureDetector(
         onTap: () => Navigator.pop(ctx),
         child: Container(
-          color: Colors.black87,
-          child: Center(
-            child: InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: Image.file(File(imagePath)),
-            ),
+          color: Colors.black,
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Image.file(File(imagePath)),
           ),
         ),
       ),
@@ -1092,38 +1036,20 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           ),
           const SizedBox(height: 12),
           
-          // 操作按钮行
-          Row(
-            children: [
-              // 复制 JSON 按钮
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _copyToClipboard(jsonContent),
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('复制JSON'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white70,
-                    side: const BorderSide(color: Colors.white24),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
+          // 操作按钮
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: knownCount > 0 ? () => _handleImport(jsonContent) : null,
+              icon: const Icon(Icons.download, size: 16),
+              label: Text(knownCount > 0 ? '一键导入' : '无已知成员'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.electricBlue,
+                disabledBackgroundColor: Colors.white24,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
               ),
-              const SizedBox(width: 8),
-              // 一键导入按钮
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: knownCount > 0 ? () => _handleImport(jsonContent) : null,
-                  icon: const Icon(Icons.download, size: 16),
-                  label: Text(knownCount > 0 ? '一键导入' : '无已知成员'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.electricBlue,
-                    disabledBackgroundColor: Colors.white24,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),
@@ -1165,14 +1091,12 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             ],
           ),
           const SizedBox(height: 12),
-          // 使用 ListView 约束高度，避免无限展开
+          // 使用 ListView 约束高度，支持滚动查看多条记录
           ConstrainedBox(
-            constraints: BoxConstraints(
+            constraints: const BoxConstraints(
               maxHeight: 200,
             ),
             child: ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
               itemCount: items.length,
               itemBuilder: (context, index) => _buildGiftItemSummary(items[index]),
             ),
