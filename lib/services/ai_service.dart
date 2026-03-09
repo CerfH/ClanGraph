@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 /// AIService - 智谱全家桶统一调度
 /// 纯文字对话: glm-4.5-air
@@ -100,6 +102,24 @@ class AIService {
     }
   }
 
+  /// 压缩图片 - 限制分辨率 1024px，质量 70%
+  /// 返回压缩后的 Uint8List
+  Future<Uint8List> _compressImage(File imageFile) async {
+    try {
+      final result = await FlutterImageCompress.compressWithFile(
+        imageFile.absolute.path,
+        minWidth: 1024,
+        minHeight: 1024,
+        quality: 70,
+        format: CompressFormat.jpeg,
+      );
+      return result ?? await imageFile.readAsBytes();
+    } catch (e) {
+      print('图片压缩失败: $e，使用原图');
+      return await imageFile.readAsBytes();
+    }
+  }
+
   /// 多模态图片识别 - 使用智谱 glm-4.6v
   /// 返回纯 JSON 字符串
   Future<String> analyzeImage(File imageFile, String contextData) async {
@@ -111,11 +131,10 @@ class AIService {
     _dio.options.baseUrl = _zhipuBaseUrl;
     _dio.options.headers['Authorization'] = 'Bearer $_zhipuApiKey';
 
-    // 转换图片为 Base64 Data URI
-    final bytes = await imageFile.readAsBytes();
-    final base64Image = base64Encode(bytes);
-    final extension = imageFile.path.split('.').last.toLowerCase();
-    final mimeType = extension == 'png' ? 'image/png' : 'image/jpeg';
+    // 压缩图片并转换为 Base64 Data URI
+    final compressedBytes = await _compressImage(imageFile);
+    final base64Image = base64Encode(compressedBytes);
+    final mimeType = 'image/jpeg'; // 压缩后统一为 JPEG
     final dataUri = 'data:$mimeType;base64,$base64Image';
 
     try {
@@ -242,19 +261,78 @@ JSON 格式：
     }
   }
 
+  /// 批量并发图片识别 - 使用 Future.wait 同时处理多张图片
+  /// [imageFiles] 图片文件列表
+  /// [contextData] 家族成员上下文数据
+  /// 返回合并后的 JSON 字符串（数组格式）
+  Future<String> analyzeImages(List<File> imageFiles, String contextData) async {
+    if (imageFiles.isEmpty) {
+      return '[]';
+    }
+
+    // 并发执行所有图片识别请求
+    final futures = imageFiles.map((file) => analyzeImage(file, contextData));
+    final responses = await Future.wait(
+      futures,
+      eagerError: false, // 即使部分失败也等待所有请求完成
+    );
+
+    // 合并所有响应结果
+    final allItems = <Map<String, dynamic>>[];
+    for (int i = 0; i < responses.length; i++) {
+      try {
+        final items = parseJsonResponseList(responses[i]);
+        allItems.addAll(items);
+      } catch (e) {
+        print('解析第 ${i + 1} 张图片结果失败: $e');
+      }
+    }
+
+    // 去重处理：根据 name 和 amount 进行简单内存级去重
+    final uniqueItems = _deduplicateItems(allItems);
+
+    return json.encode(uniqueItems);
+  }
+
+  /// 去重处理：根据 name 和 amount 进行简单内存级去重
+  List<Map<String, dynamic>> _deduplicateItems(List<Map<String, dynamic>> items) {
+    final seen = <String>{};
+    final uniqueItems = <Map<String, dynamic>>[];
+
+    for (final item in items) {
+      final name = item['name']?.toString() ?? '';
+      final amount = item['amount']?.toString() ?? '';
+      final key = '$name|$amount';
+
+      if (name.isNotEmpty && amount.isNotEmpty) {
+        if (!seen.contains(key)) {
+          seen.add(key);
+          uniqueItems.add(item);
+        } else {
+          print('去重过滤: $name - $amount');
+        }
+      } else {
+        // 保留不完整数据（可能用于调试）
+        uniqueItems.add(item);
+      }
+    }
+
+    return uniqueItems;
+  }
+
   /// 解析 AI 返回的 JSON 列表
   /// 支持数组格式和多行独立 JSON 格式
   static List<Map<String, dynamic>> parseJsonResponseList(String raw) {
     final List<Map<String, dynamic>> result = [];
-    
+
     try {
       final cleaned = cleanJsonString(raw);
       if (cleaned.isEmpty || cleaned == '{}') {
         return result;
       }
-      
+
       final decoded = json.decode(cleaned);
-      
+
       if (decoded is List) {
         // 数组格式: [{}, {}, ...]
         for (final item in decoded) {
@@ -282,7 +360,7 @@ JSON 格式：
         }
       }
     }
-    
+
     return result;
   }
 }

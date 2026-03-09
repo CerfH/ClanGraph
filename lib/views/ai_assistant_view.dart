@@ -27,19 +27,26 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   /// 消息列表 - 使用 dynamic 以支持 isJsonData 字段
   /// 每条消息包含: role, content, isJsonData
   final List<Map<String, dynamic>> _messages = [];
-  
+
   final AIService _aiService = AIService();
   final ImagePicker _picker = ImagePicker();
-  
+
   bool _isLoading = false;
-  File? _selectedImage;
+  final List<File> _selectedImages = []; // 多图选择列表
   String _loadingText = '智谱 AI 正在思考中...';
-  
+
+  // 自动吸底滚动控制
+  bool _shouldAutoScroll = true;
+  double _lastScrollOffset = 0;
+
   static const String _chatStorageKey = 'ai_chat_history_v2';
+  // 用户手动滚动阈值：距离底部超过 200px 视为手动查看历史消息
+  static const double _manualScrollThreshold = 200;
 
   @override
   void initState() {
     super.initState();
+    _setupScrollListener();
     _loadChatHistory();
   }
 
@@ -114,18 +121,18 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     }
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  /// 从相册多选图片
+  Future<void> _pickMultipleImagesFromGallery() async {
     try {
-      final XFile? pickedFile = await _picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 85,
+      final List<XFile> pickedFiles = await _picker.pickMultiImage(
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 90,
       );
 
-      if (pickedFile != null) {
+      if (pickedFiles.isNotEmpty) {
         setState(() {
-          _selectedImage = File(pickedFile.path);
+          _selectedImages.addAll(pickedFiles.map((f) => File(f.path)));
         });
       }
     } catch (e) {
@@ -140,26 +147,81 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     }
   }
 
+  /// 相机连拍模式 - 拍完一张不退出，继续拍
+  Future<void> _takePictureInBurstMode() async {
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 90,
+      );
+
+      if (pickedFile != null) {
+        setState(() {
+          _selectedImages.add(File(pickedFile.path));
+        });
+        // 不退出，允许继续拍照
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('拍照失败: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  /// 移除已选图片
+  void _removeSelectedImage(int index) {
+    setState(() {
+      if (index >= 0 && index < _selectedImages.length) {
+        _selectedImages.removeAt(index);
+      }
+    });
+  }
+
+  /// 清空所有已选图片
+  void _clearSelectedImages() {
+    setState(() {
+      _selectedImages.clear();
+    });
+  }
+
   void _showImageSourceActionSheet() {
     showCupertinoModalPopup(
       context: context,
       builder: (BuildContext context) => CupertinoActionSheet(
         title: const Text('上传礼金单据', style: TextStyle(color: Colors.white70)),
+        message: _selectedImages.isNotEmpty
+            ? Text('已选择 ${_selectedImages.length} 张图片', style: const TextStyle(color: Colors.white54, fontSize: 12))
+            : null,
         actions: <CupertinoActionSheetAction>[
           CupertinoActionSheetAction(
             child: const Text('拍照', style: TextStyle(color: Colors.white)),
             onPressed: () {
               Navigator.pop(context);
-              _pickImage(ImageSource.camera);
+              _takePictureInBurstMode();
             },
           ),
           CupertinoActionSheetAction(
-            child: const Text('从相册选择', style: TextStyle(color: Colors.white)),
+            child: const Text('从相册多选', style: TextStyle(color: Colors.white)),
             onPressed: () {
               Navigator.pop(context);
-              _pickImage(ImageSource.gallery);
+              _pickMultipleImagesFromGallery();
             },
           ),
+          if (_selectedImages.isNotEmpty)
+            CupertinoActionSheetAction(
+              child: const Text('清空已选图片', style: TextStyle(color: Colors.redAccent)),
+              onPressed: () {
+                Navigator.pop(context);
+                _clearSelectedImages();
+              },
+            ),
         ],
         cancelButton: CupertinoActionSheetAction(
           child: const Text('取消', style: TextStyle(color: Colors.white70)),
@@ -173,18 +235,22 @@ class _AIAssistantViewState extends State<AIAssistantView> {
 
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
-    if (text.isEmpty && _selectedImage == null) return;
+    if (text.isEmpty && _selectedImages.isEmpty) return;
 
     // 添加用户消息
+    final imagesToSend = List<File>.from(_selectedImages);
     setState(() {
-      if (_selectedImage != null) {
+      if (imagesToSend.isNotEmpty) {
+        // 多图消息：存储所有图片路径
         _messages.add({
           'role': 'user',
-          'content': text.isNotEmpty ? text : '识别这张礼金单据',
+          'content': text.isNotEmpty ? text : '识别 ${imagesToSend.length} 张礼金单据',
           'isJsonData': false,
-          'imagePath': _selectedImage!.path,
+          'imagePaths': imagesToSend.map((f) => f.path).toList(),
         });
-        _loadingText = '智谱 4.6V 正在识别图片...';
+        _loadingText = imagesToSend.length > 1
+            ? '智谱 4.6V 正在并发识别 ${imagesToSend.length} 张图片...'
+            : '智谱 4.6V 正在识别图片...';
       } else {
         _messages.add({
           'role': 'user',
@@ -195,6 +261,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       }
       _isLoading = true;
       _inputController.clear();
+      _selectedImages.clear(); // 清空已选图片
     });
 
     _scrollToBottom();
@@ -204,18 +271,19 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       final contextData = widget.controller.aiContextSummary;
       String response;
 
-      if (_selectedImage != null) {
-        final imageFile = _selectedImage!;
-        setState(() {
-          _selectedImage = null;
-        });
-        
-        response = await _aiService.analyzeImage(imageFile, contextData);
-        
+      if (imagesToSend.isNotEmpty) {
+        if (imagesToSend.length == 1) {
+          // 单图识别
+          response = await _aiService.analyzeImage(imagesToSend.first, contextData);
+        } else {
+          // 多图并发识别
+          response = await _aiService.analyzeImages(imagesToSend, contextData);
+        }
+
         // 尝试解析 JSON 列表，判断是否为有效礼金数据
         final items = AIService.parseJsonResponseList(response);
         final isValidGiftData = items.isNotEmpty;
-        
+
         // 添加 AI 响应消息，标记是否为 JSON 数据
         setState(() {
           _messages.add({
@@ -227,7 +295,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       } else {
         // 传递完整消息历史，实现长上下文记忆
         response = await _aiService.askAgent(
-          text, 
+          text,
           contextData,
           history: _messages,
         );
@@ -239,9 +307,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           });
         });
       }
-      
+
       await _saveChatHistory();
-      
+
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -394,14 +462,63 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     return 0.0;
   }
 
+  /// 设置滚动监听，检测用户手动滚动
+  void _setupScrollListener() {
+    _scrollController.addListener(() {
+      if (!_scrollController.hasClients) return;
+
+      final currentOffset = _scrollController.offset;
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final distanceFromBottom = maxScroll - currentOffset;
+
+      // 如果用户向上滚动超过阈值，停止自动吸底
+      if (currentOffset < _lastScrollOffset && distanceFromBottom > _manualScrollThreshold) {
+        if (_shouldAutoScroll) {
+          setState(() {
+            _shouldAutoScroll = false;
+          });
+        }
+      }
+
+      // 如果用户滚动到底部附近，恢复自动吸底
+      if (distanceFromBottom < 50) {
+        if (!_shouldAutoScroll) {
+          setState(() {
+            _shouldAutoScroll = true;
+          });
+        }
+      }
+
+      _lastScrollOffset = currentOffset;
+    });
+  }
+
   void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
+    if (!_shouldAutoScroll) return; // 用户手动查看历史消息时，不自动滚动
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  /// 强制滚动到底部（用于用户主动发送消息时）
+  void _forceScrollToBottom() {
+    _shouldAutoScroll = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
@@ -495,33 +612,97 @@ class _AIAssistantViewState extends State<AIAssistantView> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // 图片预览
-                  if (_selectedImage != null)
+                  // 多图预览区域
+                  if (_selectedImages.isNotEmpty)
                     Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      height: 80,
-                      child: Stack(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      height: 90,
+                      child: Row(
                         children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.file(_selectedImage!),
-                          ),
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _selectedImage = null;
-                                });
+                          // 图片缩略图列表
+                          Expanded(
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _selectedImages.length,
+                              itemBuilder: (context, index) {
+                                return Container(
+                                  width: 80,
+                                  height: 80,
+                                  margin: const EdgeInsets.only(right: 8),
+                                  child: Stack(
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.file(
+                                          _selectedImages[index],
+                                          width: 80,
+                                          height: 80,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                      // 删除按钮
+                                      Positioned(
+                                        top: 0,
+                                        right: 0,
+                                        child: GestureDetector(
+                                          onTap: () => _removeSelectedImage(index),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(2),
+                                            decoration: const BoxDecoration(
+                                              color: Colors.black54,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(Icons.close, size: 14, color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                      // 序号标签
+                                      Positioned(
+                                        bottom: 0,
+                                        left: 0,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black54,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            '${index + 1}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
                               },
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.close, size: 16, color: Colors.white),
+                            ),
+                          ),
+                          // 继续拍照按钮
+                          GestureDetector(
+                            onTap: _takePictureInBurstMode,
+                            child: Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppTheme.electricBlue.withValues(alpha: 0.5)),
+                              ),
+                              child: const Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.camera_alt, color: AppTheme.electricBlue, size: 24),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    '继续拍',
+                                    style: TextStyle(color: AppTheme.electricBlue, fontSize: 11),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -661,7 +842,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     final isUser = msg['role'] == 'user';
     final content = msg['content']?.toString() ?? '';
     final isJsonData = msg['isJsonData'] == true || _detectJsonInContent(content);
+    // 支持单图和多图
     final imagePath = msg['imagePath']?.toString();
+    final imagePaths = msg['imagePaths'] as List<dynamic>?;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -674,8 +857,11 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 图片消息
-            if (imagePath != null)
+            // 多图消息
+            if (imagePaths != null && imagePaths.isNotEmpty)
+              _buildMultiImagePreview(imagePaths.cast<String>()),
+            // 单图消息（兼容旧数据）
+            if (imagePath != null && imagePaths == null)
               GestureDetector(
                 onTap: () => _showFullScreenImage(imagePath),
                 child: Container(
@@ -761,6 +947,91 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// 构建多图预览组件
+  Widget _buildMultiImagePreview(List<String> paths) {
+    final int imageCount = paths.length;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.7,
+        maxHeight: 120,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 图片数量标签
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '$imageCount 张图片',
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 11,
+              ),
+            ),
+          ),
+          // 图片网格
+          SizedBox(
+            height: 80,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: paths.length,
+              itemBuilder: (context, index) {
+                return GestureDetector(
+                  onTap: () => _showFullScreenImage(paths[index]),
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    margin: const EdgeInsets.only(right: 6),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Stack(
+                        children: [
+                          Image.file(
+                            File(paths[index]),
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.cover,
+                          ),
+                          // 序号标签
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '${index + 1}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
