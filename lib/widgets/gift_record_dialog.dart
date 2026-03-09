@@ -6,13 +6,15 @@ import '../models/person.dart';
 class GiftRecordDialog extends StatefulWidget {
   final FamilyController controller;
   final String personId;
-  final GiftRecord? initialRecord; // For edit mode
+  final GiftRecord? initialRecord; // For edit mode or pre-fill
+  final bool allowMemberSelection; // Allow changing target member
 
   const GiftRecordDialog({
     super.key,
     required this.controller,
     required this.personId,
     this.initialRecord,
+    this.allowMemberSelection = false,
   });
 
   @override
@@ -24,11 +26,13 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
   final _eventController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   late DateTime _selectedDate;
+  late String _selectedPersonId;
   bool _syncToSpouse = false;
 
   @override
   void initState() {
     super.initState();
+    _selectedPersonId = widget.personId;
     if (widget.initialRecord != null) {
       _amountController.text = widget.initialRecord!.amount.toStringAsFixed(0); // Assuming integer amount for display
       _eventController.text = widget.initialRecord!.event;
@@ -50,22 +54,22 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
       final amount = double.tryParse(_amountController.text) ?? 0.0;
       final event = _eventController.text;
 
-      if (widget.initialRecord != null) {
-        // Edit Mode
+      if (widget.initialRecord != null && widget.initialRecord!.id.isNotEmpty) {
+        // Edit Mode (only when initialRecord has a valid id)
         final updatedRecord = GiftRecord(
           id: widget.initialRecord!.id,
           amount: amount,
           event: event,
           date: _selectedDate,
         );
-        widget.controller.updateGiftRecord(widget.personId, updatedRecord);
+        widget.controller.updateGiftRecord(_selectedPersonId, updatedRecord);
       } else {
-        // Add Mode
-        widget.controller.addGiftRecord(widget.personId, amount, event, _selectedDate);
+        // Add Mode (including pre-fill mode)
+        widget.controller.addGiftRecord(_selectedPersonId, amount, event, _selectedDate);
 
         // Sync to spouse if checked
         if (_syncToSpouse) {
-           final person = widget.controller.getPerson(widget.personId);
+           final person = widget.controller.getPerson(_selectedPersonId);
            if (person != null && person.spouse != null) {
              widget.controller.addGiftRecord(person.spouse!, amount, event, _selectedDate);
            }
@@ -105,9 +109,10 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
   @override
   Widget build(BuildContext context) {
     final history = widget.controller.dynamicEventHistory;
-    final isEditMode = widget.initialRecord != null;
-    final person = widget.controller.getPerson(widget.personId);
+    final isEditMode = widget.initialRecord != null && widget.initialRecord!.id.isNotEmpty;
+    final person = widget.controller.getPerson(_selectedPersonId);
     final hasSpouse = person?.spouse != null;
+    final allPeople = widget.controller.allPeople;
 
     return Dialog(
       backgroundColor: AppTheme.surfaceGrey,
@@ -131,7 +136,41 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
+                
+                // Member Selection Dropdown (if allowed)
+                if (widget.allowMemberSelection && allPeople.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    value: _selectedPersonId,
+                    decoration: InputDecoration(
+                      labelText: '家庭成员',
+                      labelStyle: const TextStyle(color: Colors.white70),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Colors.white24),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: AppTheme.electricBlue),
+                      ),
+                    ),
+                    dropdownColor: AppTheme.surfaceGrey,
+                    style: const TextStyle(color: Colors.white),
+                    items: allPeople.map((p) {
+                      return DropdownMenuItem(
+                        value: p.id,
+                        child: Text('${p.name} (${p.relationship})'),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _selectedPersonId = value;
+                        });
+                      }
+                    },
+                  ),
+                if (widget.allowMemberSelection) const SizedBox(height: 16),
                 
                 // 金额输入
                 TextFormField(
