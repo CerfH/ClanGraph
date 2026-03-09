@@ -33,7 +33,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
 
   bool _isLoading = false;
   final List<File> _selectedImages = []; // 多图选择列表
-  String _loadingText = '智谱 AI 正在思考中...';
+  String _loadingText = '正在思考中...';
 
   static const String _chatStorageKey = 'ai_chat_history_v2';
 
@@ -236,20 +236,20 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         // 多图消息：存储所有图片路径
         _messages.add({
           'role': 'user',
-          'content': text.isNotEmpty ? text : '识别 ${imagesToSend.length} 张礼金单据',
+          'content': text.isNotEmpty ? text : '识别${imagesToSend.length}张礼金单据',
           'isJsonData': false,
           'imagePaths': imagesToSend.map((f) => f.path).toList(),
         });
         _loadingText = imagesToSend.length > 1
-            ? '智谱 4.6V 正在并发识别 ${imagesToSend.length} 张图片...'
-            : '智谱 4.6V 正在识别图片...';
+            ? '正在识别${imagesToSend.length}张图片...'
+            : '正在识别图片...';
       } else {
         _messages.add({
           'role': 'user',
           'content': text,
           'isJsonData': false,
         });
-        _loadingText = '智谱 AI 正在思考中...';
+        _loadingText = '正在思考中...';
       }
       _isLoading = true;
       _inputController.clear();
@@ -783,7 +783,13 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   Widget _buildMessageBubble(Map<String, dynamic> msg) {
     final isUser = msg['role'] == 'user';
     final content = msg['content']?.toString() ?? '';
-    final isJsonData = msg['isJsonData'] == true || _detectJsonInContent(content);
+    // 优先使用已缓存的 isJsonData 字段，避免每次 build 重复解析 JSON
+    // 若尚未缓存（首次渲染），则调用检测函数，并将结果回写以供后续复用
+    bool isJsonData = msg['isJsonData'] == true;
+    if (!isJsonData && content.isNotEmpty) {
+      isJsonData = _detectJsonInContent(content);
+      if (isJsonData) msg['isJsonData'] = true; // 回写缓存，下次直接走短路
+    }
     // 支持单图和多图（过滤掉无效的图片路径）
     final imagePath = msg['imagePath']?.toString();
     final rawImagePaths = msg['imagePaths'] as List<dynamic>?;
@@ -803,7 +809,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           children: [
             // 多图消息
             if (validImagePaths.isNotEmpty)
-              _buildMultiImagePreview(validImagePaths),
+              _buildMultiImagePreview(validImagePaths, isUser: isUser),
             // 单图消息（兼容旧数据）
             if (hasValidSingleImage && rawImagePaths == null && imagePath != null)
               GestureDetector(
@@ -896,7 +902,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   }
 
   /// 构建多图预览组件
-  Widget _buildMultiImagePreview(List<String> paths) {
+  Widget _buildMultiImagePreview(List<String> paths, {bool isUser = false}) {
     final int imageCount = paths.length;
 
     return Container(
@@ -906,7 +912,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         maxHeight: 120,
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           // 图片数量标签
@@ -925,10 +931,12 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             height: 80,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
+              reverse: isUser,
               itemCount: paths.length,
               itemBuilder: (context, index) {
+                final int displayIndex = isUser ? (paths.length - 1 - index) : index;
                 return GestureDetector(
-                  onTap: () => _showFullScreenImage(paths[index]),
+                  onTap: () => _showFullScreenImage(paths[displayIndex]),
                   child: Container(
                     width: 80,
                     height: 80,
@@ -942,7 +950,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                       child: Stack(
                         children: [
                           Image.file(
-                            File(paths[index]),
+                            File(paths[displayIndex]),
                             width: 80,
                             height: 80,
                             fit: BoxFit.cover,
@@ -958,7 +966,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                '${index + 1}',
+                                '${displayIndex + 1}',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 10,
