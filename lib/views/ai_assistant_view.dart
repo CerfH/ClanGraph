@@ -2,13 +2,14 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../controllers/family_controller.dart';
 import '../services/ai_service.dart';
 import '../models/person.dart';
-import '../widgets/gift_record_dialog.dart';
+
 
 class AIAssistantView extends StatefulWidget {
   final FamilyController controller;
@@ -178,14 +179,15 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     setState(() {
       if (_selectedImage != null) {
         _messages.add({
-          'role': 'user', 
-          'content': '[图片] ${text.isNotEmpty ? text : "识别这张礼金单据"}',
+          'role': 'user',
+          'content': text.isNotEmpty ? text : '识别这张礼金单据',
           'isJsonData': false,
+          'imagePath': _selectedImage!.path,
         });
         _loadingText = '智谱 4.6V 正在识别图片...';
       } else {
         _messages.add({
-          'role': 'user', 
+          'role': 'user',
           'content': text,
           'isJsonData': false,
         });
@@ -210,9 +212,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         
         response = await _aiService.analyzeImage(imageFile, contextData);
         
-        // 尝试解析 JSON，判断是否为有效礼金数据
-        final data = AIService.parseJsonResponse(response);
-        final isValidGiftData = data != null && data.isNotEmpty && _hasValidGiftFields(data);
+        // 尝试解析 JSON 列表，判断是否为有效礼金数据
+        final items = AIService.parseJsonResponseList(response);
+        final isValidGiftData = items.isNotEmpty;
         
         // 添加 AI 响应消息，标记是否为 JSON 数据
         setState(() {
@@ -223,7 +225,12 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           });
         });
       } else {
-        response = await _aiService.askAgent(text, contextData);
+        // 传递完整消息历史，实现长上下文记忆
+        response = await _aiService.askAgent(
+          text, 
+          contextData,
+          history: _messages,
+        );
         setState(() {
           _messages.add({
             'role': 'ai',
@@ -254,21 +261,11 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     }
   }
 
-  /// 检查 JSON 是否包含有效的礼金字段
-  bool _hasValidGiftFields(Map<String, dynamic> data) {
-    // 必须有姓名
-    if (data['name'] == null || data['name'].toString().isEmpty) {
-      return false;
-    }
-    // 至少要有金额或事件
-    return data['amount'] != null || data['event'] != null;
-  }
-
-  /// 处理一键导入
+  /// 处理一键导入（后台静默处理，无UI跳转）
   void _handleImport(String jsonContent) {
-    // 解析 JSON
-    final data = AIService.parseJsonResponse(jsonContent);
-    if (data == null || data.isEmpty) {
+    // 解析 JSON 数据列表
+    final items = _parseGiftDataList(jsonContent);
+    if (items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('无法解析礼金数据'),
@@ -278,48 +275,86 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       return;
     }
 
-    // 检查是否为陌生人
-    final name = data['name']?.toString() ?? '';
-    final isNew = data['is_new'] == true;
+    // 后台自动同步：遍历记录并直接写入数据
+    int successCount = 0;
     
-    // 智能匹配成员
-    String? matchedPersonId = _findMatchingPersonId(data);
-    
-    // 如果是陌生人且没有匹配到成员，跳过
-    if (isNew && matchedPersonId == 'root') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('「$name」不在家谱中，已跳过'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
+    for (final item in items) {
+      final isNew = item['is_new'] == true;
+      
+      // 忽略新成员：若 is_new 为 true 或找不到匹配成员，直接跳过
+      if (isNew) continue;
+      
+      // 通过 _findMatchingPersonId 找到家谱中对应的成员 ID
+      final personId = _findMatchingPersonId(item);
+      
+      // 如果找不到匹配成员（返回 root 表示未匹配），跳过
+      if (personId == 'root') continue;
+      
+      // 提取金额、事件和日期字段
+      final amount = _parseAmount(item['amount']);
+      final event = item['event']?.toString() ?? '';
+      final date = DateTime.tryParse(item['date']?.toString() ?? '') ?? DateTime.now();
+      
+      // 直接写入数据
+      widget.controller.addGiftRecord(personId, amount, event, date);
+      successCount++;
     }
 
-    // 关闭聊天抽屉
-    Navigator.of(context).pop();
-    
-    // 延迟后弹出填表对话框
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (!mounted) return;
-      
-      final person = widget.controller.getPerson(matchedPersonId);
-      final record = GiftRecord(
-        id: '',
-        amount: _parseAmount(data['amount']),
-        event: data['event']?.toString() ?? '',
-        date: DateTime.tryParse(data['date']?.toString() ?? '') ?? DateTime.now(),
-      );
+    // 使用 Overlay 在屏幕顶部显示成功提示
+    _showTopOverlayNotification('导入成功：已同步 $successCount 条礼金记录');
+  }
 
-      showDialog(
-        context: context,
-        builder: (ctx) => GiftRecordDialog(
-          controller: widget.controller,
-          personId: matchedPersonId,
-          initialRecord: record,
-          allowMemberSelection: true,
+  /// 在屏幕顶部显示 Overlay 提示（避开刘海屏）
+  void _showTopOverlayNotification(String message) {
+    final overlay = Overlay.of(context);
+    final overlayEntry = OverlayEntry(
+      builder: (ctx) => Positioned(
+        top: MediaQuery.of(ctx).padding.top + 16,
+        left: 16,
+        right: 16,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.green,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-      );
+      ),
+    );
+
+    // 插入 Overlay
+    overlay.insert(overlayEntry);
+
+    // 2秒后自动移除
+    Future.delayed(const Duration(seconds: 2), () {
+      overlayEntry.remove();
     });
   }
 
@@ -383,17 +418,14 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
-              itemCount: _messages.length + (_isLoading ? 1 : 0),
+              itemCount: _messages.length,
               itemBuilder: (context, index) {
-                if (index == _messages.length) {
-                  return _buildLoadingBubble();
-                }
                 return _buildMessageBubble(_messages[index]);
               },
             ),
           ),
 
-          // Input Area
+          // Input Area (包含顶部的进度条)
           _buildInputArea(),
         ],
       ),
@@ -444,7 +476,6 @@ class _AIAssistantViewState extends State<AIAssistantView> {
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surfaceGrey,
         border: Border(top: BorderSide(color: Colors.white10)),
@@ -452,73 +483,89 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       child: SafeArea(
         child: Column(
           children: [
-            // 图片预览
-            if (_selectedImage != null)
-              Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                height: 80,
-                child: Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.file(_selectedImage!),
-                    ),
-                    Positioned(
-                      top: 0,
-                      right: 0,
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _selectedImage = null;
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: const BoxDecoration(
-                            color: Colors.black54,
-                            shape: BoxShape.circle,
+            // 加载进度条
+            if (_isLoading)
+              LinearProgressIndicator(
+                minHeight: 2,
+                color: AppTheme.electricBlue,
+                backgroundColor: Colors.white10,
+              ),
+            
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  // 图片预览
+                  if (_selectedImage != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      height: 80,
+                      child: Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(_selectedImage!),
                           ),
-                          child: const Icon(Icons.close, size: 16, color: Colors.white),
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedImage = null;
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, size: 16, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  // 输入行
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.camera_alt_outlined, color: Colors.white70),
+                        onPressed: _showImageSourceActionSheet,
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _inputController,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: _isLoading ? _loadingText : '输入问题或上传单据...',
+                            hintStyle: const TextStyle(color: Colors.white38),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.05),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                          ),
+                          enabled: !_isLoading,
+                          onSubmitted: (_) => _sendMessage(),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            // 输入行
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.camera_alt_outlined, color: Colors.white70),
-                  onPressed: _showImageSourceActionSheet,
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _inputController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: '输入问题或上传单据...',
-                      hintStyle: const TextStyle(color: Colors.white38),
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.05),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
+                      const SizedBox(width: 12),
+                      IconButton(
+                        icon: const Icon(Icons.send, color: AppTheme.electricBlue),
+                        onPressed: _isLoading ? null : _sendMessage,
                       ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 12),
-                IconButton(
-                  icon: const Icon(Icons.send, color: AppTheme.electricBlue),
-                  onPressed: _isLoading ? null : _sendMessage,
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -526,68 +573,171 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     );
   }
 
-  /// 构建消息气泡 - 支持 JSON 数据时显示导入按钮
+  /// 探测消息是否包含有效 JSON 数据（支持数组和多行格式）
+  bool _detectJsonInContent(String content) {
+    final items = _parseGiftDataList(content);
+    return items.isNotEmpty;
+  }
+
+  /// 解析礼金数据列表（支持数组格式、单个对象、多行独立 JSON）
+  /// 使用正则表达式提取所有 JSON 块，避免散乱 JSON 解析失败
+  List<Map<String, dynamic>> _parseGiftDataList(String content) {
+    final List<Map<String, dynamic>> result = [];
+    
+    // 先尝试整体解析（数组或单个对象）
+    try {
+      final cleaned = AIService.cleanJsonString(content);
+      final decoded = json.decode(cleaned);
+      
+      if (decoded is List) {
+        for (final item in decoded) {
+          if (item is Map && _isValidGiftItem(Map<String, dynamic>.from(item))) {
+            result.add(Map<String, dynamic>.from(item));
+          }
+        }
+        return result;
+      } else if (decoded is Map) {
+        if (_isValidGiftItem(Map<String, dynamic>.from(decoded))) {
+          result.add(Map<String, dynamic>.from(decoded));
+        }
+        return result;
+      }
+    } catch (_) {
+      // 整体解析失败，继续使用正则提取
+    }
+    
+    // 使用正则表达式提取所有 JSON 对象块
+    // 使用 \{[\s\S]*?\} 匹配 {...} 格式，支持多行散乱数据
+    final jsonRegex = RegExp(r'\{[\s\S]*?\}', multiLine: true);
+    final matches = jsonRegex.allMatches(content);
+    
+    for (final match in matches) {
+      final jsonStr = match.group(0);
+      if (jsonStr == null) continue;
+      
+      try {
+        final cleaned = AIService.cleanJsonString(jsonStr);
+        final item = json.decode(cleaned);
+        if (item is Map && _isValidGiftItem(Map<String, dynamic>.from(item))) {
+          result.add(Map<String, dynamic>.from(item));
+        }
+      } catch (_) {
+        // 忽略解析失败的块
+      }
+    }
+    
+    return result;
+  }
+
+  /// 检查是否为有效的礼金数据项
+  bool _isValidGiftItem(Map<String, dynamic> item) {
+    return item.containsKey('name') || item.containsKey('amount');
+  }
+
+  /// 统计已知成员数量
+  int _countKnownMembers(List<Map<String, dynamic>> items) {
+    int count = 0;
+    for (final item in items) {
+      final isNew = item['is_new'] == true;
+      if (!isNew) count++;
+    }
+    return count;
+  }
+
+  /// 复制文本到剪贴板
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已复制到剪贴板'),
+        backgroundColor: AppTheme.electricBlue,
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
+  /// 构建消息气泡 - 支持长按复制、图片显示和 JSON 数据卡片
   Widget _buildMessageBubble(Map<String, dynamic> msg) {
     final isUser = msg['role'] == 'user';
-    final isJsonData = msg['isJsonData'] == true;
     final content = msg['content']?.toString() ?? '';
-    
+    final isJsonData = msg['isJsonData'] == true || _detectJsonInContent(content);
+    final imagePath = msg['imagePath']?.toString();
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.8,
+          maxWidth: MediaQuery.of(context).size.width * 0.85,
         ),
         child: Column(
           crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // 消息气泡
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isUser
-                    ? AppTheme.electricBlue.withValues(alpha: 0.2)
-                    : Colors.white.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(isUser ? 16 : 4),
-                  bottomRight: Radius.circular(isUser ? 4 : 16),
-                ),
-                border: Border.all(
-                  color: isUser
-                      ? AppTheme.electricBlue.withValues(alpha: 0.3)
-                      : Colors.white10,
-                ),
-              ),
-              child: isJsonData 
-                  ? _buildJsonPreview(content)
-                  : Text(
-                      content,
-                      style: const TextStyle(color: Colors.white, height: 1.5),
-                    ),
-            ),
-            
-            // 一键导入按钮（仅 JSON 数据显示）
-            if (isJsonData)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: ElevatedButton.icon(
-                  onPressed: () => _handleImport(content),
-                  icon: const Icon(Icons.download, size: 18),
-                  label: const Text('点击一键同步至礼金簿'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.electricBlue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+            // 图片消息
+            if (imagePath != null)
+              GestureDetector(
+                onTap: () => _showFullScreenImage(imagePath),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  constraints: const BoxConstraints(
+                    maxWidth: 200,
+                    maxHeight: 200,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      File(imagePath),
+                      fit: BoxFit.cover,
                     ),
                   ),
                 ),
               ),
-            
+
+            // 文本消息气泡 - 长按复制
+            if (content.isNotEmpty)
+              GestureDetector(
+                onLongPress: () => _copyToClipboard(content),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isUser
+                        ? AppTheme.electricBlue.withValues(alpha: 0.2)
+                        : Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(isUser ? 16 : 4),
+                      bottomRight: Radius.circular(isUser ? 4 : 16),
+                    ),
+                    border: Border.all(
+                      color: isUser
+                          ? AppTheme.electricBlue.withValues(alpha: 0.3)
+                          : Colors.white10,
+                    ),
+                  ),
+                  child: isJsonData
+                      ? _buildJsonPreview(content)
+                      : SelectableText(
+                          content,
+                          style: const TextStyle(color: Colors.white, height: 1.5),
+                          contextMenuBuilder: (context, editableTextState) {
+                            return AdaptiveTextSelectionToolbar.editableText(
+                              editableTextState: editableTextState,
+                            );
+                          },
+                        ),
+                ),
+              ),
+
+            // JSON 数据同步卡片
+            if (isJsonData && !isUser)
+              _buildSyncCard(content),
+
             const SizedBox(height: 8),
           ],
         ),
@@ -595,39 +745,136 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     );
   }
 
-  /// 构建 JSON 预览显示
+  /// 显示全屏图片查看
+  void _showFullScreenImage(String imagePath) {
+    showDialog(
+      context: context,
+      builder: (ctx) => GestureDetector(
+        onTap: () => Navigator.pop(ctx),
+        child: Container(
+          color: Colors.black87,
+          child: Center(
+            child: InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: Image.file(File(imagePath)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建数据同步卡片
+  Widget _buildSyncCard(String jsonContent) {
+    // 解析数据并统计
+    final items = _parseGiftDataList(jsonContent);
+    final knownCount = _countKnownMembers(items);
+    final unknownCount = items.length - knownCount;
+    
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+      ),
+      // 明确约束宽度
+      constraints: BoxConstraints(
+        minWidth: 200,
+        maxWidth: 300,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 顶部提示 - 显示统计信息
+          Row(
+            children: [
+              Icon(Icons.analytics_outlined, color: AppTheme.electricBlue, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: RichText(
+                  text: TextSpan(
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    children: [
+                      TextSpan(text: '检测到 '),
+                      TextSpan(
+                        text: '$knownCount',
+                        style: TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                      ),
+                      TextSpan(text: ' 条已知成员记录'),
+                      if (unknownCount > 0) ...[
+                        const TextSpan(text: '，'),
+                        TextSpan(
+                          text: '$unknownCount',
+                          style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+                        ),
+                        const TextSpan(text: ' 条新成员已跳过'),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          
+          // 操作按钮行
+          Row(
+            children: [
+              // 复制 JSON 按钮
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _copyToClipboard(jsonContent),
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('复制JSON'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white70,
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // 一键导入按钮
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: knownCount > 0 ? () => _handleImport(jsonContent) : null,
+                  icon: const Icon(Icons.download, size: 16),
+                  label: Text(knownCount > 0 ? '一键导入' : '无已知成员'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.electricBlue,
+                    disabledBackgroundColor: Colors.white24,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建 JSON 预览显示（支持多条记录）
   Widget _buildJsonPreview(String jsonContent) {
-    try {
-      final data = AIService.parseJsonResponse(jsonContent);
-      if (data == null || data.isEmpty) {
-        return const Text(
-          '识别结果为空',
-          style: TextStyle(color: Colors.white54),
-        );
-      }
+    final items = _parseGiftDataList(jsonContent);
+    
+    if (items.isEmpty) {
+      return const Text(
+        '识别结果为空',
+        style: TextStyle(color: Colors.white54),
+      );
+    }
 
-      final name = data['name']?.toString() ?? '未知';
-      final amount = _parseAmount(data['amount']);
-      final event = data['event']?.toString() ?? '未知事件';
-      final date = data['date']?.toString() ?? '';
-      final isNew = data['is_new'] == true;
-      
-      // 查找匹配成员
-      String? matchedId = data['matched_id']?.toString();
-      Person? matchedPerson;
-      if (matchedId != null && matchedId.isNotEmpty) {
-        matchedPerson = widget.controller.getPerson(matchedId);
-      }
-      // 如果没有 matched_id，尝试通过姓名匹配
-      if (matchedPerson == null && !isNew) {
-        final id = _findMatchingPersonId(data);
-        if (id != 'root') {
-          matchedPerson = widget.controller.getPerson(id);
-        }
-      }
-
+    // 多条记录时显示列表（限制最大高度）
+    if (items.length > 1) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
@@ -638,7 +885,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
               ),
               const SizedBox(width: 8),
               Text(
-                '识别结果',
+                '识别结果（${items.length}条）',
                 style: TextStyle(
                   color: AppTheme.electricBlue,
                   fontWeight: FontWeight.bold,
@@ -647,38 +894,168 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             ],
           ),
           const SizedBox(height: 12),
-          _buildInfoRow('姓名', name),
-          _buildInfoRow('金额', '¥${amount.toStringAsFixed(0)}'),
-          _buildInfoRow('事件', event),
-          if (date.isNotEmpty) _buildInfoRow('日期', date),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(
-                isNew ? Icons.person_add : Icons.person,
-                size: 14,
-                color: isNew ? Colors.orange : AppTheme.electricBlue,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                isNew 
-                    ? '新成员（需手动添加）'
-                    : '匹配: ${matchedPerson?.name ?? "未匹配"}',
-                style: TextStyle(
-                  color: isNew ? Colors.orange : AppTheme.electricBlue,
-                  fontSize: 12,
-                ),
-              ),
-            ],
+          // 使用 ListView 约束高度，避免无限展开
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: 200,
+            ),
+            child: ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: items.length,
+              itemBuilder: (context, index) => _buildGiftItemSummary(items[index]),
+            ),
           ),
         ],
       );
-    } catch (e) {
-      return Text(
-        jsonContent,
-        style: const TextStyle(color: Colors.white, height: 1.5),
-      );
     }
+
+    // 单条记录时显示详细信息
+    return _buildSingleGiftItemDetail(items.first);
+  }
+
+  /// 构建单条礼金记录详情
+  Widget _buildSingleGiftItemDetail(Map<String, dynamic> data) {
+    final name = data['name']?.toString() ?? '未知';
+    final amount = _parseAmount(data['amount']);
+    final event = data['event']?.toString() ?? '未知事件';
+    final date = data['date']?.toString() ?? '';
+    final isNew = data['is_new'] == true;
+    
+    // 查找匹配成员
+    String? matchedId = data['matched_id']?.toString();
+    Person? matchedPerson;
+    if (matchedId != null && matchedId.isNotEmpty) {
+      matchedPerson = widget.controller.getPerson(matchedId);
+    }
+    // 如果没有 matched_id，尝试通过姓名匹配
+    if (matchedPerson == null && !isNew) {
+      final id = _findMatchingPersonId(data);
+      if (id != 'root') {
+        matchedPerson = widget.controller.getPerson(id);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.receipt_long,
+              color: AppTheme.electricBlue,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '识别结果',
+              style: TextStyle(
+                color: AppTheme.electricBlue,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _buildInfoRow('姓名', name),
+        _buildInfoRow('金额', '¥${amount.toStringAsFixed(0)}'),
+        _buildInfoRow('事件', event),
+        if (date.isNotEmpty) _buildInfoRow('日期', date),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(
+              isNew ? Icons.person_add : Icons.person,
+              size: 14,
+              color: isNew ? Colors.orange : AppTheme.electricBlue,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              isNew 
+                  ? '新成员（需手动添加）'
+                  : '匹配: ${matchedPerson?.name ?? "未匹配"}',
+              style: TextStyle(
+                color: isNew ? Colors.orange : AppTheme.electricBlue,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 构建礼金记录简要信息（用于多条记录列表）
+  Widget _buildGiftItemSummary(Map<String, dynamic> data) {
+    final name = data['name']?.toString() ?? '未知';
+    final amount = _parseAmount(data['amount']);
+    final event = data['event']?.toString() ?? '';
+    final isNew = data['is_new'] == true;
+    final matchedId = data['matched_id']?.toString();
+    
+    // 查找匹配成员名称
+    String matchedName = '';
+    if (matchedId != null && matchedId.isNotEmpty) {
+      final person = widget.controller.getPerson(matchedId);
+      if (person != null) matchedName = person.name;
+    }
+    
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          // 状态图标
+          Icon(
+            isNew ? Icons.person_add_outlined : Icons.check_circle_outline,
+            size: 16,
+            color: isNew ? Colors.orange : AppTheme.electricBlue,
+          ),
+          const SizedBox(width: 8),
+          // 主要信息：姓名给了金额
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                children: [
+                  TextSpan(
+                    text: name,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const TextSpan(text: ' 给了 '),
+                  TextSpan(
+                    text: '¥${amount.toStringAsFixed(0)}',
+                    style: TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                  ),
+                  if (event.isNotEmpty) ...[
+                    const TextSpan(text: '（'),
+                    TextSpan(text: event),
+                    const TextSpan(text: '）'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          // 匹配状态标签
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: isNew 
+                  ? Colors.orange.withValues(alpha: 0.2)
+                  : AppTheme.electricBlue.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              isNew ? '新成员' : (matchedName.isNotEmpty ? matchedName : '已匹配'),
+              style: TextStyle(
+                color: isNew ? Colors.orange : AppTheme.electricBlue,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildInfoRow(String label, String value) {
@@ -698,43 +1075,6 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             style: const TextStyle(color: Colors.white, fontSize: 13),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildLoadingBubble() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.1),
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(4),
-            bottomRight: Radius.circular(16),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppTheme.electricBlue,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              _loadingText,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-          ],
-        ),
       ),
     );
   }

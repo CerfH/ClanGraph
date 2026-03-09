@@ -141,7 +141,7 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                 // Member Selection Dropdown (if allowed)
                 if (widget.allowMemberSelection && allPeople.isNotEmpty)
                   DropdownButtonFormField<String>(
-                    value: _selectedPersonId,
+                    initialValue: _selectedPersonId,
                     decoration: InputDecoration(
                       labelText: '家庭成员',
                       labelStyle: const TextStyle(color: Colors.white70),
