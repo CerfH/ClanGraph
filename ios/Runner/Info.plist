@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+    <key>NSCameraUsageDescription</key>
+    <string>需要访问相机以拍摄礼金单据</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>需要访问相册以选择礼金单据图片</string>
 </dict>
 </plist>

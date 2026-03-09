@@ -1,51 +1,56 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class AIService {
   late final Dio _dio;
-  late final String _apiKey;
-  late final String _baseUrl;
+  late final Dio _zhipuDio;
+
+  // Use getters to access environment variables directly
+  String get _apiKey => dotenv.env['AI_API_KEY'] ?? '';
+  String get _baseUrl => dotenv.env['AI_BASE_URL'] ?? 'https://api.deepseek.com';
+  String get _zhipuApiKey => dotenv.env['ZHIPU_API_KEY'] ?? '';
+  String get _zhipuBaseUrl => dotenv.env['ZHIPU_BASE_URL'] ?? 'https://open.bigmodel.cn/api/paas/v4/';
 
   AIService() {
-    _apiKey = dotenv.env['AI_API_KEY'] ?? '';
-    _baseUrl = dotenv.env['AI_BASE_URL'] ?? 'https://api.deepseek.com';
-
+    // DeepSeek Configuration
     _dio = Dio(BaseOptions(
       baseUrl: _baseUrl,
       headers: {
-        'Authorization': 'Bearer $_apiKey',
         'Content-Type': 'application/json',
       },
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 60),
-      validateStatus: (status) => status != null && status < 500, // 允许接收 4xx 错误以便调试
+      validateStatus: (status) => status != null && status < 500,
+    ));
+
+    // Zhipu Configuration
+    _zhipuDio = Dio(BaseOptions(
+      baseUrl: _zhipuBaseUrl,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      connectTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(seconds: 120),
+      validateStatus: (status) => status != null && status < 500,
     ));
   }
 
+  // Regular Text Chat (DeepSeek)
   Future<String> askAgent(String question, String contextData) async {
     if (_apiKey.isEmpty) {
-      // 尝试重新读取，因为 main 里的 load 可能是异步还没完成，或者 hot restart 后内存状态
-      _apiKey = dotenv.env['AI_API_KEY'] ?? '';
-      _dio.options.headers['Authorization'] = 'Bearer $_apiKey';
+      throw Exception('DeepSeek API Key not found in .env');
     }
 
-    if (_apiKey.isEmpty) {
-      throw Exception('API Key not found in .env');
-    }
-
-    // 确保每次请求都使用最新的 Key（防止初始化时 Key 为空）
+    _dio.options.baseUrl = _baseUrl;
     _dio.options.headers['Authorization'] = 'Bearer $_apiKey';
 
     try {
-      print('Request Headers: ${_dio.options.headers}'); 
-      // DeepSeek 官方文档通常是 https://api.deepseek.com/chat/completions
-      // 如果 BaseURL 是 https://api.deepseek.com，那么 path 是 /chat/completions
-      // 如果 BaseURL 已经带了 v1，那么 path 就不带 v1
-      // 这里假设用户 .env 里配的是 https://api.deepseek.com
       final response = await _dio.post(
-        '/chat/completions', 
+        '/chat/completions',
         data: {
-          'model': 'deepseek-chat', // 默认模型，可根据需要调整
+          'model': 'deepseek-chat',
           'messages': [
             {
               'role': 'system',
@@ -60,29 +65,104 @@ class AIService {
         },
       );
 
-      if (response.statusCode == 200) {
-        final data = response.data;
-        if (data != null &&
-            data['choices'] != null &&
-            data['choices'].isNotEmpty) {
-          return data['choices'][0]['message']['content'].toString();
-        }
-      } else {
-        // 增加更详细的错误日志
-        print('AI Error Status: ${response.statusCode}');
-        print('AI Error Body: ${response.data}');
-        throw Exception('API Error: ${response.statusCode} - ${response.data}');
-      }
-      
-      throw Exception('Failed to get response: ${response.statusCode}');
+      return _parseResponse(response);
     } on DioException catch (e) {
-      print('DioException: ${e.message}');
-      if (e.response != null) {
-        print('Response Data: ${e.response?.data}');
-      }
-      throw Exception('Network error: ${e.message}');
+      _handleDioError(e);
+      rethrow;
     } catch (e) {
       throw Exception('Unknown error: $e');
     }
+  }
+
+  // Multimodal Vision Chat (Zhipu GLM-4V)
+  Future<String> analyzeImage(File imageFile, String contextData) async {
+    if (_zhipuApiKey.isEmpty) {
+      throw Exception('Zhipu API Key not found in .env');
+    }
+
+    _zhipuDio.options.baseUrl = _zhipuBaseUrl;
+    _zhipuDio.options.headers['Authorization'] = 'Bearer $_zhipuApiKey';
+
+    // Convert image to Base64
+    final bytes = await imageFile.readAsBytes();
+    final base64Image = base64Encode(bytes);
+
+    try {
+      final response = await _zhipuDio.post(
+        'chat/completions',
+        data: {
+          'model': dotenv.env['ZHIPU_MODEL_VISION'] ?? 'glm-4.6v',
+          'messages': [
+            {
+              'role': 'system',
+              'content': '''
+你是一个精通中国家族礼尚往来的智能管家。
+任务：从图片中提取【姓名、金额、事件、日期】。
+家族成员数据：$contextData。
+匹配规则：对比家族成员数据，若姓名匹配则返回 matched_id；若不匹配，根据姓氏猜测关系并标记为 is_new: true。
+输出要求：严格返回 JSON 格式，不要包含 markdown 标记。
+JSON 格式示例：
+{
+  "name": "张三",
+  "amount": 1000,
+  "event": "结婚",
+  "date": "2023-10-01",
+  "matched_id": "12345", 
+  "is_new": false
+}
+如果无法识别或图片无关，返回空 JSON {}。
+'''
+            },
+            {
+              'role': 'user',
+              'content': [
+                {
+                  'type': 'image_url',
+                  'image_url': {
+                    'url': base64Image
+                  }
+                },
+                {
+                  'type': 'text',
+                  'text': '请帮我识别这张图片里的礼金信息'
+                }
+              ]
+            }
+          ],
+          'temperature': 0.1, // Lower temperature for extraction tasks
+        },
+      );
+
+      return _parseResponse(response);
+    } on DioException catch (e) {
+      _handleDioError(e);
+      rethrow;
+    } catch (e) {
+      throw Exception('Unknown error: $e');
+    }
+  }
+
+  String _parseResponse(Response response) {
+    if (response.statusCode == 200) {
+      final data = response.data;
+      if (data != null &&
+          data['choices'] != null &&
+          data['choices'].isNotEmpty) {
+        return data['choices'][0]['message']['content'].toString();
+      }
+    } else {
+      print('AI Error Status: ${response.statusCode}');
+      print('AI Error Body: ${response.data}');
+      throw Exception('API Error: ${response.statusCode} - ${response.data}');
+    }
+    throw Exception('Failed to get response: ${response.statusCode}');
+  }
+
+  void _handleDioError(DioException e) {
+    print('DioException: ${e.message}');
+    if (e.response != null) {
+      print('Response Data: ${e.response?.data}');
+    }
+    throw Exception('Network error: ${e.message}');
   }
 }
