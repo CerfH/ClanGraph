@@ -95,6 +95,8 @@ class GalaxyPainter extends CustomPainter {
   final double breathPhase;
   // 焦点模式: 关联节点ID集合
   final Set<String> relatedIds;
+  // 预计算的配偶关系映射 (personId -> spouseIds)
+  final Map<String, Set<String>> spouseMap;
 
   const GalaxyPainter({
     required this.nodes,
@@ -103,6 +105,7 @@ class GalaxyPainter extends CustomPainter {
     this.highlightedIds = const {},
     this.breathPhase = 0.0,
     this.relatedIds = const {},
+    this.spouseMap = const {},
   });
 
   @override
@@ -198,15 +201,18 @@ class GalaxyPainter extends CustomPainter {
         }
       }
 
-      // Spouse-Spouse 直线
-      if (person.spouse != null) {
-        final toPos = centerOf[person.spouse!];
+      // Spouse-Spouse 直线 (使用预计算的配偶关系)
+      final spouseIds = spouseMap[person.id] ?? <String>{};
+      
+      // 绘制配偶连线
+      for (final spouseId in spouseIds) {
+        final toPos = centerOf[spouseId];
         if (toPos != null) {
-          final key = _edgeKey(person.id, person.spouse!);
+          final key = _edgeKey(person.id, spouseId);
           if (drawn.add(key)) {
             // 焦点模式: 配偶连线高亮
             final isSpouseRelated = selectedId != null && 
-                (person.id == selectedId || person.spouse == selectedId);
+                (person.id == selectedId || spouseId == selectedId);
             
             final spousePaint = Paint()
               ..color = isSpouseRelated
@@ -368,7 +374,8 @@ class GalaxyPainter extends CustomPainter {
         oldDelegate.people != people ||
         oldDelegate.highlightedIds != highlightedIds ||
         oldDelegate.breathPhase != breathPhase ||
-        oldDelegate.relatedIds != relatedIds;
+        oldDelegate.relatedIds != relatedIds ||
+        oldDelegate.spouseMap != spouseMap;
   }
 }
 
@@ -429,8 +436,41 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     super.dispose();
   }
   
-  // 获取关联节点ID集合 (父母、子女、配偶)
-  Set<String> _getRelatedIds(String personId) {
+  // 预计算所有配偶关系 (personId -> spouseIds)
+  Map<String, Set<String>> _buildSpouseMap() {
+    final spouseMap = <String, Set<String>>{};
+    final allPeople = widget.controller.allPeople;
+    
+    for (final person in allPeople) {
+      final spouseIds = <String>{};
+      
+      // 方式1: 直接通过 spouse 字段
+      if (person.spouse != null && person.spouse!.isNotEmpty) {
+        spouseIds.add(person.spouse!);
+      }
+      
+      // 方式2: 通过子女反向查找
+      for (final childId in person.children) {
+        final child = widget.controller.getPerson(childId);
+        if (child != null) {
+          for (final parentId in child.parents) {
+            if (parentId != person.id) {
+              spouseIds.add(parentId);
+            }
+          }
+        }
+      }
+      
+      if (spouseIds.isNotEmpty) {
+        spouseMap[person.id] = spouseIds;
+      }
+    }
+    
+    return spouseMap;
+  }
+
+  // 获取关联节点ID集合 (父母、子女、配偶、兄弟姐妹)
+  Set<String> _getRelatedIds(String personId, Map<String, Set<String>> spouseMap) {
     final related = <String>{};
     final person = widget.controller.getPerson(personId);
     if (person == null) return related;
@@ -441,13 +481,17 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     // 添加子女
     related.addAll(person.children);
     
-    // 添加配偶 (通过子女反向查找)
-    for (final childId in person.children) {
-      final child = widget.controller.getPerson(childId);
-      if (child != null) {
-        for (final parentId in child.parents) {
-          if (parentId != personId) {
-            related.add(parentId);
+    // 添加配偶 (从预计算的配偶关系中获取)
+    final spouseIds = spouseMap[personId] ?? <String>{};
+    related.addAll(spouseIds);
+    
+    // 添加兄弟姐妹 (通过父母查找)
+    for (final parentId in person.parents) {
+      final parent = widget.controller.getPerson(parentId);
+      if (parent != null) {
+        for (final siblingId in parent.children) {
+          if (siblingId != personId) {
+            related.add(siblingId);
           }
         }
       }
@@ -566,8 +610,11 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       .map((p) => p.id)
                       .toSet();
               
+              // 预计算配偶关系
+              final spouseMap = _buildSpouseMap();
+              
               // 焦点模式: 获取关联节点
-              final relatedIds = _focusedId != null ? _getRelatedIds(_focusedId!) : <String>{};
+              final relatedIds = _focusedId != null ? _getRelatedIds(_focusedId!, spouseMap) : <String>{};
               
               // 应用缩放动画到节点
               final animatedNodes = nodes.map((node) {
@@ -636,6 +683,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                               highlightedIds: highlightedIds,
                               breathPhase: _breathCtrl.value,
                               relatedIds: relatedIds,
+                              spouseMap: spouseMap,
                             ),
                           ),
                         ),
