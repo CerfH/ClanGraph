@@ -1,11 +1,13 @@
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../controllers/family_controller.dart';
 import '../models/person.dart';
 import '../services/z_algorithm.dart';
 import '../widgets/person_details_sidebar.dart';
 import '../widgets/person_dialog.dart';
+import '../widgets/spring_button.dart';
+import '../widgets/glassmorphic_container.dart';
 import '../theme/app_theme.dart';
 import 'ai_assistant_view.dart';
 
@@ -83,7 +85,7 @@ class GalaxyLayoutEngine {
 }
 
 // ─────────────────────────────────────────────
-// Galaxy Painter  (v5 – Detail-Panel Aligned Highlighting)
+// Galaxy Painter  (v6 – Atmospheric Focus + Flow Animation)
 // ─────────────────────────────────────────────
 class GalaxyPainter extends CustomPainter {
   final List<_NodePosition> nodes;
@@ -93,6 +95,10 @@ class GalaxyPainter extends CustomPainter {
   final Set<String> highlightedIds;
   // 呼吸灯动画进度 [0, 1]
   final double breathPhase;
+  // 流光动画进度 [0, 1]
+  final double flowPhase;
+  // 选中节点的呼吸缩放 [0, 1]
+  final double selectedBreathPhase;
 
   const GalaxyPainter({
     required this.nodes,
@@ -100,6 +106,8 @@ class GalaxyPainter extends CustomPainter {
     this.selectedId,
     this.highlightedIds = const {},
     this.breathPhase = 0.0,
+    this.flowPhase = 0.0,
+    this.selectedBreathPhase = 0.0,
   });
 
   // 快速查找: id -> Person
@@ -238,6 +246,24 @@ class GalaxyPainter extends CustomPainter {
     return related;
   }
 
+  // 预计算直接关联节点 (父母、子女、配偶，不包括兄弟姐妹)
+  Set<String> _buildDirectConnectionSet(String personId) {
+    final related = <String>{};
+    final person = _personById[personId];
+    if (person == null) return related;
+    
+    // 父母
+    related.addAll(_getParentIds(person));
+    // 子女
+    related.addAll(_getChildrenIds(person));
+    // 配偶
+    related.addAll(_getSpouseIds(person));
+    
+    return related;
+  }
+
+
+
   // 检查 targetId 是否与选中的人有关联 (用于节点高亮)
   bool _isRelated(String targetId) {
     if (selectedId == null) return false;
@@ -250,14 +276,15 @@ class GalaxyPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
+    final bool inFocusMode = selectedId != null;
 
-    // Layer 1 – grid
-    _drawGrid(canvas, size);
+    // Layer 1 – grid (焦点模式下降低透明度)
+    _drawGrid(canvas, size, inFocusMode: inFocusMode);
 
-    // Layer 2 – orbit rings (compact radii)
-    _drawOrbitRings(canvas, center);
+    // Layer 2 – orbit rings (焦点模式下降低透明度)
+    _drawOrbitRings(canvas, center, inFocusMode: inFocusMode);
 
-    // Layer 3 – kinship lines (直线, below nodes)
+    // Layer 3 – kinship lines (流光动画)
     _drawKinshipLines(canvas);
 
     // Layer 4 – nodes on top
@@ -270,16 +297,17 @@ class GalaxyPainter extends CustomPainter {
       _drawHighlightRings(canvas);
     }
     
-    // Layer 6 – 选中节点的高亮光环
+    // Layer 6 – 选中节点的高亮光环 (带呼吸效果)
     if (selectedId != null) {
       _drawSelectedNodeRing(canvas);
     }
   }
 
   // ── Grid ────────────────────────────────────
-  void _drawGrid(Canvas canvas, Size size) {
+  void _drawGrid(Canvas canvas, Size size, {required bool inFocusMode}) {
+    final alpha = inFocusMode ? 0.01 : 0.03;
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.03)
+      ..color = Colors.white.withValues(alpha: alpha)
       ..strokeWidth = 1;
     const double spacing = 40;
     for (double x = 0; x < size.width; x += spacing) {
@@ -291,9 +319,10 @@ class GalaxyPainter extends CustomPainter {
   }
 
   // ── Orbit rings (compact) ───────────────────
-  void _drawOrbitRings(Canvas canvas, Offset center) {
+  void _drawOrbitRings(Canvas canvas, Offset center, {required bool inFocusMode}) {
+    final alpha = inFocusMode ? 0.015 : 0.04;
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.04)
+      ..color = Colors.white.withValues(alpha: alpha)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     for (final r in [80.0, 160.0, 240.0, 300.0]) {
@@ -305,6 +334,7 @@ class GalaxyPainter extends CustomPainter {
   // 直线连线: 使用与详细信息面板完全相同的算法
   // 兄弟姐妹之间不画线，只高亮节点
   // 样式: 统一使用 Colors.grey.withOpacity(0.3)
+  // 高亮连线: 流光渐变效果
   void _drawKinshipLines(Canvas canvas) {
     // Build fast id → center lookup
     final Map<String, Offset> centerOf = {
@@ -316,6 +346,11 @@ class GalaxyPainter extends CustomPainter {
     
     // 预计算连线关系
     final connectionMap = _buildConnectionMap();
+    
+    // 预计算直接关联节点
+    final directConnections = selectedId != null 
+        ? _buildDirectConnectionSet(selectedId!) 
+        : <String>{};
 
     for (final person in people) {
       final fromPos = centerOf[person.id];
@@ -334,17 +369,83 @@ class GalaxyPainter extends CustomPainter {
           final isHighlighted = selectedId != null && 
               (person.id == selectedId || targetId == selectedId);
           
-          final linePaint = Paint()
-            ..color = isHighlighted 
-                ? Colors.white.withValues(alpha: 0.8)
-                : Colors.grey.withValues(alpha: 0.3)
-            ..strokeWidth = isHighlighted ? 2.0 : 1.0
-            ..style = PaintingStyle.stroke;
-          
-          canvas.drawLine(fromPos, toPos, linePaint);
+          if (isHighlighted) {
+            // 流光渐变连线
+            _drawFlowLine(canvas, fromPos, toPos, person.id, targetId, directConnections);
+          } else {
+            // 普通连线
+            final linePaint = Paint()
+              ..color = Colors.grey.withValues(alpha: 0.3)
+              ..strokeWidth = 1.0
+              ..style = PaintingStyle.stroke;
+            canvas.drawLine(fromPos, toPos, linePaint);
+          }
         }
       }
     }
+  }
+
+  // 绘制流光渐变连线
+  void _drawFlowLine(Canvas canvas, Offset from, Offset to, String fromId, String toId, Set<String> directConnections) {
+    // 确定流光方向: 从选中节点流向关联节点
+    final bool isFromSelected = fromId == selectedId;
+    final start = isFromSelected ? from : to;
+    final end = isFromSelected ? to : from;
+    
+    // 获取目标节点的辈分颜色 (从 nodes 中查找)
+    final targetNode = nodes.firstWhere(
+      (n) => n.person.id == (isFromSelected ? toId : fromId),
+      orElse: () => nodes.isNotEmpty ? nodes.first : _NodePosition(
+        person: _personById.values.first,
+        center: Offset.zero,
+        radius: 30,
+        steps: 0,
+        generation: 0,
+      ),
+    );
+    final generationColor = GalaxyLayoutEngine.generationColor(targetNode.generation);
+    
+    // 创建流光渐变
+    final gradient = LinearGradient(
+      begin: Alignment.centerLeft,
+      end: Alignment.centerRight,
+      colors: [
+        Colors.white.withValues(alpha: 0.9),
+        generationColor.withValues(alpha: 0.8),
+        Colors.white.withValues(alpha: 0.6),
+      ],
+      stops: [
+        0.0,
+        0.5 + 0.5 * math.sin(flowPhase * 2 * math.pi),
+        1.0,
+      ],
+    );
+
+    // 绘制流光效果
+    final flowPaint = Paint()
+      ..shader = gradient.createShader(
+        Rect.fromPoints(start, end).inflate(2),
+      )
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    // 主连线
+    canvas.drawLine(start, end, flowPaint);
+    
+    // 流光点效果
+    final flowOffset = (math.sin(flowPhase * 2 * math.pi) + 1) / 2; // 0.0 ~ 1.0
+    final flowPoint = Offset.lerp(start, end, flowOffset)!;
+    
+    final glowPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.8)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawCircle(flowPoint, 3, glowPaint);
+    
+    final corePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(flowPoint, 1.5, corePaint);
   }
 
   // ── 高亮外环 (呼吸灯效果) ──────────────────
@@ -395,12 +496,46 @@ class GalaxyPainter extends CustomPainter {
   static String _edgeKey(String a, String b) =>
       a.compareTo(b) < 0 ? '$a|$b' : '$b|$a';
 
+  // ── 虚线圆环 (用于兄弟姐妹标识) ───────────────
+  void _drawDashedRing(Canvas canvas, Offset center, double radius, Color color) {
+    const dashLength = 4.0;
+    const gapLength = 3.0;
+    const strokeWidth = 1.5;
+    
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+    
+    // 计算圆周长
+    final circumference = 2 * math.pi * radius;
+    final totalDashCount = (circumference / (dashLength + gapLength)).floor();
+    
+    // 绘制虚线
+    for (int i = 0; i < totalDashCount; i++) {
+      final startAngle = (i * (dashLength + gapLength)) / radius;
+      final sweepAngle = dashLength / radius;
+      
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweepAngle,
+        false,
+        paint,
+      );
+    }
+  }
+
   // ── Individual node ──────────────────────────
   void _drawNode(Canvas canvas, _NodePosition node) {
     final isSelected = node.person.id == selectedId;
     final isRoot = node.person.id == 'root';
     // 使用双向指针判定关联关系 (直接关联 + 兄弟姐妹)
     final isRelated = _isRelated(node.person.id);
+    // 区分直接关联和兄弟姐妹
+    final isDirectConnection = selectedId != null && 
+        _buildDirectConnectionSet(selectedId!).contains(node.person.id);
+    final isSibling = isRelated && !isDirectConnection && !isSelected;
     final color = GalaxyLayoutEngine.generationColor(node.generation);
     final r = node.radius;
     final center = node.center;
@@ -411,7 +546,7 @@ class GalaxyPainter extends CustomPainter {
       if (isSelected || isRelated) {
         opacity = 1.0; // 选中节点或关联节点保持不透明
       } else {
-        opacity = 0.15; // 无关节点降低透明度
+        opacity = 0.08; // 无关节点大幅降低透明度 (相机虚化效果)
       }
     }
 
@@ -438,6 +573,11 @@ class GalaxyPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = isSelected ? 2.5 : 1.5;
     canvas.drawCircle(center, r, borderPaint);
+
+    // 兄弟姐妹虚线光环
+    if (isSibling && opacity > 0.1) {
+      _drawDashedRing(canvas, center, r + 4, color.withValues(alpha: 0.6));
+    }
 
     // Text sizing
     final fontSize = r >= 35 ? 13.0 : (r >= 24 ? 11.0 : 9.0);
@@ -493,7 +633,9 @@ class GalaxyPainter extends CustomPainter {
         oldDelegate.selectedId != selectedId ||
         oldDelegate.people != people ||
         oldDelegate.highlightedIds != highlightedIds ||
-        oldDelegate.breathPhase != breathPhase;
+        oldDelegate.breathPhase != breathPhase ||
+        oldDelegate.flowPhase != flowPhase ||
+        oldDelegate.selectedBreathPhase != selectedBreathPhase;
   }
 }
 
@@ -521,6 +663,12 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
   // 呼吸灯动画
   late final AnimationController _breathCtrl;
   
+  // 流光动画控制器
+  late final AnimationController _flowCtrl;
+  
+  // 选中节点呼吸动画
+  late final AnimationController _selectedBreathCtrl;
+  
   // 焦点模式: 选中节点的缩放动画
   late final AnimationController _scaleCtrl;
   String? _focusedId; // 当前焦点节点ID
@@ -539,6 +687,18 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
       duration: const Duration(milliseconds: 1800),
     )..repeat();
     
+    // 流光动画控制器 (2秒循环)
+    _flowCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+    
+    // 选中节点呼吸动画 (3秒循环)
+    _selectedBreathCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat();
+    
     // 缩放动画控制器
     _scaleCtrl = AnimationController(
       vsync: this,
@@ -550,6 +710,8 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
   void dispose() {
     _searchCtrl.dispose();
     _breathCtrl.dispose();
+    _flowCtrl.dispose();
+    _selectedBreathCtrl.dispose();
     _scaleCtrl.dispose();
     super.dispose();
   }
@@ -706,6 +868,8 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                         onTapUp: (details) {
                           final id = _hitTest(details.localPosition, nodes);
                           if (id != null) {
+                            // 触感反馈
+                            HapticFeedback.mediumImpact();
                             // 焦点模式: 点击节点只设置焦点，不弹出侧边栏
                             setState(() {
                               _focusedId = id;
@@ -724,7 +888,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                           }
                         },
                         child: AnimatedBuilder(
-                          animation: Listenable.merge([_breathCtrl, _scaleCtrl]),
+                          animation: Listenable.merge([_breathCtrl, _scaleCtrl, _flowCtrl, _selectedBreathCtrl]),
                           builder: (context, _) => CustomPaint(
                             size: canvasSize,
                             painter: GalaxyPainter(
@@ -733,6 +897,8 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                               selectedId: _focusedId,
                               highlightedIds: highlightedIds,
                               breathPhase: _breathCtrl.value,
+                              flowPhase: _flowCtrl.value,
+                              selectedBreathPhase: _selectedBreathCtrl.value,
                             ),
                           ),
                         ),
@@ -740,51 +906,41 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                     ),
                   ),
               
-                  // 2. 搜索框 (顶部中间, 半透明毛玻璃)
+                  // 2. 搜索框 (顶部中间, Apple级毛玻璃)
                   Positioned(
                     top: 16,
                     left: 70,
                     right: 70,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(24),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.15),
-                            width: 1,
+                    child: SearchGlassmorphicContainer(
+                      child: TextField(
+                        controller: _searchCtrl,
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: '搜索姓名或关系…',
+                          hintStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.4),
+                            fontSize: 14,
                           ),
-                        ),
-                        child: TextField(
-                          controller: _searchCtrl,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                          decoration: InputDecoration(
-                            hintText: '搜索姓名或关系…',
-                            hintStyle: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.4),
-                              fontSize: 14,
-                            ),
-                            prefixIcon: Icon(
-                              Icons.search,
-                              color: Colors.white.withValues(alpha: 0.5),
-                              size: 18,
-                            ),
-                            suffixIcon: _searchQuery.isNotEmpty
-                                ? IconButton(
-                                    icon: Icon(
-                                      Icons.close,
-                                      color: Colors.white.withValues(alpha: 0.6),
-                                      size: 16,
-                                    ),
-                                    onPressed: () => _searchCtrl.clear(),
-                                  )
-                                : null,
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: Colors.white.withValues(alpha: 0.5),
+                            size: 18,
+                          ),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? SpringButton(
+                                  hapticType: HapticFeedbackType.light,
+                                  onTap: () => _searchCtrl.clear(),
+                                  child: Icon(
+                                    Icons.close,
+                                    color: Colors.white.withValues(alpha: 0.6),
+                                    size: 16,
+                                  ),
+                                )
+                              : null,
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
                           ),
                         ),
                       ),
@@ -798,57 +954,35 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       right: 0,
                       bottom: 40,
                       child: Center(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(28),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(28),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.2),
-                                width: 1,
+                        child: SpringButton(
+                          hapticType: HapticFeedbackType.medium,
+                          onTap: _showPersonDetail,
+                          child: ButtonGlassmorphicContainer(
+                            onTap: _showPersonDetail,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                                vertical: 16,
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.2),
-                                  blurRadius: 20,
-                                  spreadRadius: 2,
-                                ),
-                              ],
-                            ),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: _showPersonDetail,
-                                  borderRadius: BorderRadius.circular(28),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 32,
-                                      vertical: 16,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          '显示详细信息',
-                                          style: TextStyle(
-                                            color: Colors.white.withValues(alpha: 0.9),
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Icon(
-                                          Icons.chevron_right,
-                                          color: Colors.white.withValues(alpha: 0.7),
-                                          size: 20,
-                                        ),
-                                      ],
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '显示详细信息',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.95),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 0.5,
                                     ),
                                   ),
-                                ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.chevron_right,
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                    size: 20,
+                                  ),
+                                ],
                               ),
                             ),
                           ),

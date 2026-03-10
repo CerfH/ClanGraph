@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/person.dart';
 import '../theme/app_theme.dart';
-import '../controllers/family_controller.dart'; // 必须引入 Controller
-import 'gift_record_dialog.dart'; // 引入礼金记录弹窗
+import '../controllers/family_controller.dart';
+import 'gift_record_dialog.dart';
+import 'spring_button.dart';
 
 class PersonDetailsSidebar extends StatelessWidget {
   final Person? person;
@@ -52,9 +53,10 @@ class PersonDetailsSidebar extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white54),
-                    onPressed: onClose,
+                  SpringButton(
+                    hapticType: HapticFeedbackType.light,
+                    onTap: onClose,
+                    child: const Icon(Icons.close, color: Colors.white54),
                   ),
                 ],
               ),
@@ -429,38 +431,35 @@ class PersonDetailsSidebar extends StatelessWidget {
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: isDestructive
-                    ? Colors.red.withValues(alpha: 0.5)
-                    : AppTheme.minimalistBlue,
+      child: SpringButton(
+        hapticType: HapticFeedbackType.light,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: isDestructive
+                  ? Colors.red.withValues(alpha: 0.5)
+                  : AppTheme.minimalistBlue,
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: isDestructive ? Colors.redAccent : Colors.white70,
               ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  icon,
-                  size: 20,
-                  color: isDestructive ? Colors.redAccent : Colors.white70,
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isDestructive ? Colors.redAccent : Colors.white,
+                  fontWeight: FontWeight.w500,
                 ),
-                const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: isDestructive ? Colors.redAccent : Colors.white,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
