@@ -93,18 +93,18 @@ class SearchGlassmorphicContainer extends StatelessWidget {
     return GlassmorphicContainer(
       blurSigma: blurSigma,
       // 与底部按钮一致：降低底色透明度
-      backgroundColor: const Color.fromARGB(255, 16, 158, 85).withValues(alpha: 0.03),
+      backgroundColor: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.03),
       borderRadius: borderRadius,
       // 搜索框边框稍细一些，更精致
-      borderWidth: 0.2,
+      //borderWidth: 0.1,
       // 与底部按钮一致：高亮度边框
-      borderColor: Colors.white.withValues(alpha: 0.9),
+      borderColor: Colors.white.withValues(alpha: 0.3),
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
           // 与底部按钮一致：增强左上角亮度
-          Colors.white.withValues(alpha: 0.60),
+          Colors.white.withValues(alpha: 0.20),
           Colors.white.withValues(alpha: 0.10),
           Colors.black.withValues(alpha: 0.05),
         ],
@@ -153,7 +153,7 @@ class ButtonGlassmorphicContainer extends StatelessWidget {
     return GlassmorphicContainer(
       blurSigma: blurSigma,
       // 稍微降低底色透明度，让背景的星系星点能透过来
-      backgroundColor: const Color.fromARGB(255, 181, 6, 15).withValues(alpha: 0.03),
+      backgroundColor: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.03),
       borderRadius: borderRadius,
       // 边框宽度 1.8，在手机端最精致
       borderWidth: 1.8,
