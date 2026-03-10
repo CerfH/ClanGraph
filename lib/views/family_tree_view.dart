@@ -8,6 +8,7 @@ import '../widgets/person_details_sidebar.dart';
 import '../widgets/person_dialog.dart';
 import '../widgets/spring_button.dart';
 import '../widgets/glassmorphic_container.dart';
+import '../widgets/floating_ai_assistant.dart';
 import '../theme/app_theme.dart';
 import 'ai_assistant_view.dart';
 
@@ -716,18 +717,15 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     super.dispose();
   }
   
-  void _refreshLayout() {
-    setState(() {
-      _layoutSeed = DateTime.now().millisecondsSinceEpoch;
-    });
-  }
-
   void _showAIAssistant() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      // 移除默认边距，让内容撑满屏幕
+      constraints: const BoxConstraints(),
       builder: (context) => Container(
+        width: MediaQuery.of(context).size.width,
         height: MediaQuery.of(context).size.height * 0.8,
         decoration: BoxDecoration(
           color: AppTheme.surfaceGrey,
@@ -846,17 +844,6 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
               
               return Stack(
                 children: [
-                  // 0. 刷新按鈕 (左上角)
-                  Positioned(
-                    top: 20,
-                    left: 20,
-                    child: IconButton(
-                      icon: const Icon(Icons.refresh, color: Colors.white70),
-                      onPressed: _refreshLayout,
-                      tooltip: '刷新布局',
-                    ),
-                  ),
-              
                   // 1. Galaxy canvas (interactive)
                   Positioned.fill(
                     child: InteractiveViewer(
@@ -947,22 +934,23 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                     ),
                   ),
               
-                  // 3. 底部浮动毛玻璃按钮 (仅在选中节点时显示)
+                  // 3. 底部浮动毛玻璃按钮 (仅在选中节点时显示) - 紧凑居中
                   if (_focusedId != null && !_showDetailSidebar)
                     Positioned(
+                      bottom: 40,
                       left: 0,
                       right: 0,
-                      bottom: 40,
-                      child: Center(
+                      child: UnconstrainedBox(
                         child: SpringButton(
                           hapticType: HapticFeedbackType.medium,
                           onTap: _showPersonDetail,
                           child: ButtonGlassmorphicContainer(
                             onTap: _showPersonDetail,
+                            borderRadius: const BorderRadius.all(Radius.circular(20)),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 32,
-                                vertical: 16,
+                                horizontal: 20,
+                                vertical: 11,
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -971,16 +959,16 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                                     '显示详细信息',
                                     style: TextStyle(
                                       color: Colors.white.withValues(alpha: 0.95),
-                                      fontSize: 16,
+                                      fontSize: 14,
                                       fontWeight: FontWeight.w500,
-                                      letterSpacing: 0.5,
+                                      letterSpacing: 0.3,
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 4),
                                   Icon(
                                     Icons.chevron_right,
                                     color: Colors.white.withValues(alpha: 0.8),
-                                    size: 20,
+                                    size: 16,
                                   ),
                                 ],
                               ),
@@ -1018,11 +1006,15 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAIAssistant,
-        backgroundColor: AppTheme.electricBlue,
-        child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
+      // 可爱的语音助手浮动按钮 - 放在右侧避免与底部毛玻璃按钮重叠
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(right: 8, bottom: 100),
+        child: FloatingAIAssistant(
+          onTap: _showAIAssistant,
+          isRightSide: true,
+        ),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 

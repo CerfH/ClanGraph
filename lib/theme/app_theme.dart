@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // Deep Space Grey (深空灰) - Background
-  static const Color deepSpaceGrey = Color.fromARGB(255, 26, 26, 46);
+  // 深空蓝紫渐变背景 - 比纯黑更有层次，比深蓝更通透
+  static const Color deepSpaceGrey = Color(0xFF1a1a2e);
   
-  // Lighter Grey for Surface/Cards
-  static const Color surfaceGrey = Color(0xFF16213E);
+  // 略带蓝紫色调的表面色，与背景形成微妙对比
+  static const Color surfaceGrey = Color(0xFF162035);
   
   // Minimalist Blue (极简蓝) - Primary/Accent
   static const Color minimalistBlue = Color(0xFF0F3460);

@@ -19,11 +19,11 @@ class GlassmorphicContainer extends StatelessWidget {
     super.key,
     required this.child,
     this.blurSigma = 25.0,
-    this.backgroundColor = const Color(0x0DFFFFFF), // Colors.white.withOpacity(0.05)
+    this.backgroundColor = const Color(0x0DFFFFFF),
     this.gradient,
     this.borderRadius = const BorderRadius.all(Radius.circular(28)),
     this.borderWidth = 0.5,
-    this.borderColor = const Color(0x33FFFFFF), // Colors.white.withOpacity(0.2)
+    this.borderColor = const Color(0x33FFFFFF),
     this.boxShadow,
     this.padding = EdgeInsets.zero,
     this.margin = EdgeInsets.zero,
@@ -50,40 +50,23 @@ class GlassmorphicContainer extends StatelessWidget {
           children: [
             // 1. 毛玻璃模糊层
             BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: blurSigma,
-                sigmaY: blurSigma,
-              ),
-              child: Container(
-                color: Colors.transparent,
-              ),
+              filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+              child: Container(color: Colors.transparent),
             ),
             // 2. 背景色层
-            Container(
-              color: backgroundColor,
-            ),
+            Container(color: backgroundColor),
             // 3. 渐变层 (背光感)
             if (gradient != null)
-              Container(
-                decoration: BoxDecoration(
-                  gradient: gradient,
-                ),
-              ),
+              Container(decoration: BoxDecoration(gradient: gradient)),
             // 4. 微光边框层
             Container(
               decoration: BoxDecoration(
                 borderRadius: borderRadius,
-                border: Border.all(
-                  color: borderColor,
-                  width: borderWidth,
-                ),
+                border: Border.all(color: borderColor, width: borderWidth),
               ),
             ),
             // 5. 内容层
-            Padding(
-              padding: padding,
-              child: child,
-            ),
+            Padding(padding: padding, child: child),
           ],
         ),
       ),
@@ -92,7 +75,7 @@ class GlassmorphicContainer extends StatelessWidget {
 }
 
 /// 搜索框专用毛玻璃容器
-/// 带有顶部亮、底部暗的背光渐变
+/// 与底部按钮保持一致的高级毛玻璃效果
 class SearchGlassmorphicContainer extends StatelessWidget {
   final Widget child;
   final double blurSigma;
@@ -101,7 +84,7 @@ class SearchGlassmorphicContainer extends StatelessWidget {
   const SearchGlassmorphicContainer({
     super.key,
     required this.child,
-    this.blurSigma = 20.0,
+    this.blurSigma = 25.0,
     this.borderRadius = const BorderRadius.all(Radius.circular(24)),
   });
 
@@ -109,26 +92,39 @@ class SearchGlassmorphicContainer extends StatelessWidget {
   Widget build(BuildContext context) {
     return GlassmorphicContainer(
       blurSigma: blurSigma,
-      backgroundColor: Colors.black.withValues(alpha: 0.45),
+      // 与底部按钮一致：降低底色透明度
+      backgroundColor: const Color.fromARGB(255, 16, 158, 85).withValues(alpha: 0.03),
       borderRadius: borderRadius,
-      borderWidth: 0.5,
-      borderColor: Colors.white.withValues(alpha: 0.15),
+      // 搜索框边框稍细一些，更精致
+      borderWidth: 0.2,
+      // 与底部按钮一致：高亮度边框
+      borderColor: Colors.white.withValues(alpha: 0.9),
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          Colors.white.withValues(alpha: 0.08),
-          Colors.transparent,
+          // 与底部按钮一致：增强左上角亮度
+          Colors.white.withValues(alpha: 0.60),
+          Colors.white.withValues(alpha: 0.10),
           Colors.black.withValues(alpha: 0.05),
         ],
-        stops: const [0.0, 0.5, 1.0],
+        // 与底部按钮一致：光照集中在边缘
+        stops: const [0.0, 0.15, 1.0],
       ),
       boxShadow: [
+        // 与底部按钮一致：主阴影
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.2),
-          blurRadius: 20,
-          spreadRadius: 0,
-          offset: const Offset(0, 4),
+          color: Colors.black.withValues(alpha: 0.4),
+          blurRadius: 40,
+          spreadRadius: -8,
+          offset: const Offset(0, 15),
+        ),
+        // 与底部按钮一致：顶部微光
+        BoxShadow(
+          color: Colors.white.withValues(alpha: 0.15),
+          blurRadius: 15,
+          spreadRadius: -2,
+          offset: const Offset(0, -1),
         ),
       ],
       child: child,
@@ -156,32 +152,39 @@ class ButtonGlassmorphicContainer extends StatelessWidget {
   Widget build(BuildContext context) {
     return GlassmorphicContainer(
       blurSigma: blurSigma,
-      backgroundColor: Colors.white.withValues(alpha: 0.08),
+      // 稍微降低底色透明度，让背景的星系星点能透过来
+      backgroundColor: const Color.fromARGB(255, 181, 6, 15).withValues(alpha: 0.03),
       borderRadius: borderRadius,
-      borderWidth: 0.5,
-      borderColor: Colors.white.withValues(alpha: 0.25),
+      // 边框宽度 1.8，在手机端最精致
+      borderWidth: 1.8,
+      // 高亮度边框，金属冷光感
+      borderColor: Colors.white.withValues(alpha: 0.9),
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          Colors.white.withValues(alpha: 0.1),
-          Colors.transparent,
-          Colors.black.withValues(alpha: 0.02),
+          // 增强左上角亮度，白一圈的关键
+          Colors.white.withValues(alpha: 0.60),
+          Colors.white.withValues(alpha: 0.10),
+          Colors.black.withValues(alpha: 0.05),
         ],
-        stops: const [0.0, 0.6, 1.0],
+        // 光照效果集中在边缘 15% 区域
+        stops: const [0.0, 0.15, 1.0],
       ),
       boxShadow: [
+        // 主阴影：深色下沉感
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.35),
-          blurRadius: 30,
-          spreadRadius: -5,
-          offset: const Offset(0, 10),
+          color: Colors.black.withValues(alpha: 0.4),
+          blurRadius: 40,
+          spreadRadius: -8,
+          offset: const Offset(0, 15),
         ),
+        // 副阴影：顶部微光，增强边缘厚度
         BoxShadow(
-          color: Colors.white.withValues(alpha: 0.05),
-          blurRadius: 10,
+          color: Colors.white.withValues(alpha: 0.15),
+          blurRadius: 15,
           spreadRadius: -2,
-          offset: const Offset(0, -2),
+          offset: const Offset(0, -1),
         ),
       ],
       child: Material(
@@ -189,8 +192,8 @@ class ButtonGlassmorphicContainer extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: borderRadius,
-          splashColor: Colors.white.withValues(alpha: 0.1),
-          highlightColor: Colors.white.withValues(alpha: 0.05),
+          splashColor: Colors.white.withValues(alpha: 0.15),
+          highlightColor: Colors.white.withValues(alpha: 0.08),
           child: child,
         ),
       ),
