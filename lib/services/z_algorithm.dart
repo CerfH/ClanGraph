@@ -118,196 +118,118 @@ class TieredRippleLayout {
   /// Fix 2 - 表亲双路径: 无论表弟的父母是"大姑"还是"大姑父"被录入系统，都能正确识别为 T2
   /// Fix 3 - 祖辈辈分推断: 利用 relationship 字段关键词兜底，解决 AI 无法判断关系时辈分错乱
   int _calculateTier(Person person, Map<String, Person> byId, String rootId) {
-    // Root 永远是 T1
     if (person.id == rootId) return 1;
-
     final root = byId[rootId];
     if (root == null) return 3;
 
-    // 检查是否为配偶
-    if (root.spouse == person.id) return 1;
-
-    // 检查是否为父母
-    if (root.parents.contains(person.id)) return 1;
-
-    // 检查是否为子女
-    if (root.children.contains(person.id)) return 1;
-
-    // 检查是否为亲兄妹 (有共同父母)
-    for (final parentId in root.parents) {
-      final parent = byId[parentId];
-      if (parent != null && parent.children.contains(person.id)) {
-        return 1;
-      }
+    // 【核心工具】严格判定两人是否为亲/同父异母/同母异父兄弟姐妹（至少共享一个父母）
+    bool isSibling(Person a, Person b) {
+      if (a.id == b.id) return false;
+      return a.parents.any((p) => b.parents.contains(p));
     }
 
-    // 检查是否为祖父母 (父母的父母)
-    for (final parentId in root.parents) {
-      final parent = byId[parentId];
-      if (parent != null) {
-        if (parent.parents.contains(person.id)) return 2; // 祖父母
-        if (parent.spouse == person.id) return 2; // 父母的配偶 (继父母等)
-      }
+    // ==========================================
+    // 第一步：严格计算【血缘 T1】和【血缘 T2】
+    // ==========================================
+    bool isT1Blood = false;
+    bool isT2Blood = false;
+
+    // 1. 判断 T1 血缘 (父母、子女、亲兄妹)
+    if (root.parents.contains(person.id) ||
+        root.children.contains(person.id) ||
+        isSibling(root, person)) {
+      isT1Blood = true;
     }
 
-    // 检查是否为姑/舅 (父母的兄妹)
-    for (final parentId in root.parents) {
-      final parent = byId[parentId];
-      if (parent != null) {
-        for (final grandparentId in parent.parents) {
-          final grandparent = byId[grandparentId];
-          if (grandparent != null && grandparent.children.contains(person.id)) {
-            return 2; // 父母的兄妹
+    // 2. 判断 T2 血缘 (祖父母、亲姑舅、亲表堂兄妹)
+    if (!isT1Blood) {
+      // 2.1 祖父母
+      for (final pId in root.parents) {
+        if (byId[pId]?.parents.contains(person.id) ?? false) isT2Blood = true;
+      }
+      
+      // 2.2 亲姑舅 (必须是 root 父母的亲兄妹)
+      if (!isT2Blood) {
+        for (final pId in root.parents) {
+          final parent = byId[pId];
+          if (parent != null && isSibling(parent, person)) isT2Blood = true;
+        }
+      }
+      
+      // 2.3 亲表/堂兄妹 (重点修复：必须是 person 的父母与 root 的父母是亲兄妹)
+      if (!isT2Blood) {
+        for (final myParentId in person.parents) {
+          final myParent = byId[myParentId];
+          if (myParent != null) {
+            for (final rParentId in root.parents) {
+              final rParent = byId[rParentId];
+              if (rParent != null && isSibling(myParent, rParent)) {
+                isT2Blood = true;
+                break;
+              }
+            }
           }
+          if (isT2Blood) break;
         }
       }
     }
 
-    // ── Fix 2: 表/堂亲双路径检查 ──────────────────────────────────
-    // 路径 A: 通过血亲侧（姑/舅是血亲子女）
-    // 路径 B: 通过姻亲侧（姑/舅的配偶被录入系统，其配偶是父母的兄妹）
-    // 只要 person 的父母中任意一人是"父母的兄妹"或"父母兄妹的配偶"，该人即为 T2
-    for (final personParentId in person.parents) {
-      final personParent = byId[personParentId];
-      if (personParent == null) continue;
+    // 输出血缘结果
+    if (isT1Blood) return 1;
+    if (isT2Blood) return 2;
 
-      // 路径 A: personParent 是 root 的父母的兄妹 (血亲姑/舅)
-      for (final rootParentId in root.parents) {
-        final rootParent = byId[rootParentId];
-        if (rootParent == null) continue;
-        for (final gpId in rootParent.parents) {
-          final gp = byId[gpId];
-          if (gp != null && gp.children.contains(personParentId)) {
-            return 2; // 表/堂亲 (血亲路径)
-          }
+    // ==========================================
+    // 第二步：终极防漏与寄生逻辑 (配偶继承)
+    // ==========================================
+    // 如果走到这里，说明该节点在血缘上是个 T3 (外人)。我们来看配偶能不能带他升舱！
+    if (root.spouse == person.id) return 1; // 我的配偶，直接 T1
+
+    if (person.spouse != null && person.spouse!.isNotEmpty) {
+      final spouse = byId[person.spouse!];
+      if (spouse != null) {
+        // 重新对配偶做一次【纯血缘】判定
+        bool spouseIsT1Blood = root.parents.contains(spouse.id) ||
+                               root.children.contains(spouse.id) ||
+                               isSibling(root, spouse);
+        if (spouseIsT1Blood) return 1; // 比如嫂子继承哥哥的 T1
+
+        bool spouseIsT2Blood = false;
+        // 配偶是祖父母？
+        for (final pId in root.parents) {
+          if (byId[pId]?.parents.contains(spouse.id) ?? false) spouseIsT2Blood = true;
+          final parent = byId[pId];
+          if (parent != null && isSibling(parent, spouse)) spouseIsT2Blood = true;
         }
-      }
-
-      // 路径 B: personParent 的配偶是 root 的父母的兄妹 (姻亲路径，小姑父→表弟)
-      if (personParent.spouse != null) {
-        final personParentSpouseId = personParent.spouse!;
-        for (final rootParentId in root.parents) {
-          final rootParent = byId[rootParentId];
-          if (rootParent == null) continue;
-          for (final gpId in rootParent.parents) {
-            final gp = byId[gpId];
-            if (gp != null && gp.children.contains(personParentSpouseId)) {
-              return 2; // 表/堂亲 (姻亲路径)
+        // 配偶是亲表堂兄妹？
+        if (!spouseIsT2Blood) {
+          for (final spParentId in spouse.parents) {
+            final spParent = byId[spParentId];
+            if (spParent != null) {
+              for (final rParentId in root.parents) {
+                final rParent = byId[rParentId];
+                if (rParent != null && isSibling(spParent, rParent)) spouseIsT2Blood = true;
+              }
             }
           }
         }
+
+        if (spouseIsT2Blood) return 2; // 完美解决：小姑父继承小姑的 T2，表姐夫继承表姐的 T2！
       }
     }
 
-    // ── Fix 1: 姻亲等级继承 ──────────────────────────────────────
-    // 若当前节点初判为 T3，但其配偶已经是 T1/T2，则继承配偶等级
-    // 这确保了「小姑父」与「小姑」始终同等级、同大小
-    if (person.spouse != null) {
-      final spouse = byId[person.spouse!];
-      if (spouse != null) {
-        final spouseTier = _calculateTierBloodOnly(spouse, byId, rootId);
-        if (spouseTier < 3) return spouseTier;
-      }
-    }
+    // ==========================================
+    // 第三步：屏蔽 NLP 干扰 (已注释)
+    // ==========================================
+    // 强烈建议不要打开这里！这绝对是导致你原本应该是 3 的人变成 2 的罪魁祸首！
+    // 机器瞎猜 relationship 极容易把“远房表叔”强行判定为 T2。
+    // final tier = _inferTierFromRelationship(person.relationship);
+    // if (tier != null) return tier;
 
-    // ── Fix 3: relationship 关键词辅助兜底 ──────────────────────
-    // 当 AI 录入时只知道存在某人但无法建立完整关系链时，
-    // 通过 relationship 字段中的辅助关键词进行层级推断
-    final tier = _inferTierFromRelationship(person.relationship);
-    if (tier != null) return tier;
-
-    // 其他为 T3
     return 3;
   }
 
   /// 仅通过血缘路径计算层级 (不含姻亲继承, 避免循环递归)
-  int _calculateTierBloodOnly(Person person, Map<String, Person> byId, String rootId) {
-    if (person.id == rootId) return 1;
-    final root = byId[rootId];
-    if (root == null) return 3;
-
-    if (root.spouse == person.id) return 1;
-    if (root.parents.contains(person.id)) return 1;
-    if (root.children.contains(person.id)) return 1;
-
-    for (final parentId in root.parents) {
-      final parent = byId[parentId];
-      if (parent != null && parent.children.contains(person.id)) return 1;
-    }
-
-    for (final parentId in root.parents) {
-      final parent = byId[parentId];
-      if (parent != null) {
-        if (parent.parents.contains(person.id)) return 2;
-        if (parent.spouse == person.id) return 2;
-      }
-    }
-
-    for (final parentId in root.parents) {
-      final parent = byId[parentId];
-      if (parent != null) {
-        for (final gpId in parent.parents) {
-          final gp = byId[gpId];
-          if (gp != null && gp.children.contains(person.id)) return 2;
-        }
-      }
-    }
-
-    // 表/堂亲血亲路径
-    for (final personParentId in person.parents) {
-      for (final rootParentId in root.parents) {
-        final rootParent = byId[rootParentId];
-        if (rootParent == null) continue;
-        for (final gpId in rootParent.parents) {
-          final gp = byId[gpId];
-          if (gp != null && gp.children.contains(personParentId)) return 2;
-        }
-      }
-    }
-
-    return 3;
-  }
-
-  /// 通过 relationship 字段关键词推断层级
-  /// 解决 AI 无法建立完整关系链时（如"老太"只知道是某人的父亲）的辈分错乱问题
-  int? _inferTierFromRelationship(String relationship) {
-    final rel = relationship.toLowerCase();
-
-    // T1 关键词：直系亲属
-    const t1Keywords = [
-      '父亲', '母亲', '爸爸', '妈妈', '老爸', '老妈',
-      '儿子', '女儿', '配偶', '丈夫', '妻子', '老公', '老婆',
-      '兄弟', '姐妹', '哥哥', '弟弟', '姐姐', '妹妹',
-      'father', 'mother', 'son', 'daughter', 'husband', 'wife', 'sibling',
-    ];
-    for (final kw in t1Keywords) {
-      if (rel.contains(kw)) return 1;
-    }
-
-    // T2 关键词：祖辈、姑舅、表堂
-    const t2Keywords = [
-      '爷爷', '奶奶', '姥爷', '外公', '姥姥', '外婆', '祖父', '祖母', '外祖',
-      '姑姑', '姑父', '舅舅', '舅妈', '姨妈', '姨夫', '伯父', '叔叔', '伯伯',
-      '表哥', '表弟', '表姐', '表妹', '堂哥', '堂弟', '堂姐', '堂妹',
-      '叔父', '大伯', '二伯', '大叔', '二叔',
-      'grandfather', 'grandmother', 'grandpa', 'grandma', 'uncle', 'aunt', 'cousin',
-    ];
-    for (final kw in t2Keywords) {
-      if (rel.contains(kw)) return 2;
-    }
-
-    // T2 关键词：曾祖辈（按T2处理，避免完全消失在T3边缘）
-    const t2AncestorKeywords = [
-      '老太', '太爷', '太奶', '曾祖', '高祖', '外曾祖', '外太',
-      'great-grand', 'great grand',
-    ];
-    for (final kw in t2AncestorKeywords) {
-      if (rel.contains(kw)) return 2;
-    }
-
-    return null; // 无法推断
-  }
-
+  
   /// 硬核防重叠检测
   bool _checkCollision(Offset candidate, double radius, List<NodeLayoutData> placed) {
     for (final node in placed) {
