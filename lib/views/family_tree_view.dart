@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import '../controllers/family_controller.dart';
 import '../models/person.dart';
@@ -82,7 +83,7 @@ class GalaxyLayoutEngine {
 }
 
 // ─────────────────────────────────────────────
-// Galaxy Painter  (v2 – with kinship lines)
+// Galaxy Painter  (v3 – Focus Mode)
 // ─────────────────────────────────────────────
 class GalaxyPainter extends CustomPainter {
   final List<_NodePosition> nodes;
@@ -92,6 +93,8 @@ class GalaxyPainter extends CustomPainter {
   final Set<String> highlightedIds;
   // 呼吸灯动画进度 [0, 1]
   final double breathPhase;
+  // 焦点模式: 关联节点ID集合
+  final Set<String> relatedIds;
 
   const GalaxyPainter({
     required this.nodes,
@@ -99,6 +102,7 @@ class GalaxyPainter extends CustomPainter {
     this.selectedId,
     this.highlightedIds = const {},
     this.breathPhase = 0.0,
+    this.relatedIds = const {},
   });
 
   @override
@@ -119,9 +123,14 @@ class GalaxyPainter extends CustomPainter {
       _drawNode(canvas, node);
     }
 
-    // Layer 5 – 高亮外环 (呼吸灯)
+    // Layer 5 – 高亮外环 (呼吸灯效果)
     if (highlightedIds.isNotEmpty) {
       _drawHighlightRings(canvas);
+    }
+    
+    // Layer 6 – 选中节点的高亮光环
+    if (selectedId != null) {
+      _drawSelectedNodeRing(canvas);
     }
   }
 
@@ -151,15 +160,9 @@ class GalaxyPainter extends CustomPainter {
   }
 
   // ── Kinship lines ────────────────────────────
-  // 贝塞尔曲线连线: 仅在 Parent-Child 和 Spouse-Spouse 之间绘制
-  // 样式: 淡灰色贝塞尔曲线, 穿过圆圈下方
+  // 直线连线: 仅在 Parent-Child 和 Spouse-Spouse 之间绘制
+  // 样式: 统一使用 Colors.grey.withOpacity(0.3)
   void _drawKinshipLines(Canvas canvas) {
-    // 淡灰色贝塞尔曲线
-    final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.22)
-      ..strokeWidth = 1.0
-      ..style = PaintingStyle.stroke;
-
     // Build fast id → center lookup
     final Map<String, Offset> centerOf = {
       for (final n in nodes) n.person.id: n.center
@@ -172,27 +175,46 @@ class GalaxyPainter extends CustomPainter {
       final fromPos = centerOf[person.id];
       if (fromPos == null) continue;
 
-      // Parent-Child 贝塞尔曲线
+      // Parent-Child 直线
       for (final childId in person.children) {
         final toPos = centerOf[childId];
         if (toPos == null) continue;
         
         final key = _edgeKey(person.id, childId);
         if (drawn.add(key)) {
+          // 焦点模式: 关联节点的连线高亮为白色
+          final isRelated = selectedId != null && 
+              ((person.id == selectedId && relatedIds.contains(childId)) ||
+               (childId == selectedId && relatedIds.contains(person.id)));
+          
+          final linePaint = Paint()
+            ..color = isRelated 
+                ? Colors.white.withValues(alpha: 0.8)
+                : Colors.grey.withValues(alpha: 0.3)
+            ..strokeWidth = isRelated ? 2.0 : 1.0
+            ..style = PaintingStyle.stroke;
+          
           canvas.drawLine(fromPos, toPos, linePaint);
         }
       }
 
-      // Spouse-Spouse 直线 (粉色区分配偶关系)
+      // Spouse-Spouse 直线
       if (person.spouse != null) {
         final toPos = centerOf[person.spouse!];
         if (toPos != null) {
           final key = _edgeKey(person.id, person.spouse!);
           if (drawn.add(key)) {
+            // 焦点模式: 配偶连线高亮
+            final isSpouseRelated = selectedId != null && 
+                (person.id == selectedId || person.spouse == selectedId);
+            
             final spousePaint = Paint()
-              ..color = Colors.pinkAccent.withValues(alpha: 0.30)
-              ..strokeWidth = 1.0
+              ..color = isSpouseRelated
+                  ? Colors.white.withValues(alpha: 0.8)
+                  : Colors.grey.withValues(alpha: 0.3)
+              ..strokeWidth = isSpouseRelated ? 2.0 : 1.0
               ..style = PaintingStyle.stroke;
+            
             canvas.drawLine(fromPos, toPos, spousePaint);
           }
         }
@@ -223,6 +245,28 @@ class GalaxyPainter extends CustomPainter {
     }
   }
 
+  // ── 选中节点的高亮光环 ────────────────────────
+  void _drawSelectedNodeRing(Canvas canvas) {
+    for (final node in nodes) {
+      if (node.person.id != selectedId) continue;
+      
+      // 绘制高亮光环
+      final ringPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.9)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0;
+      
+      // 外环
+      canvas.drawCircle(node.center, node.radius + 6, ringPaint);
+      
+      // 发光效果
+      final glowPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.4)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
+      canvas.drawCircle(node.center, node.radius + 10, glowPaint);
+    }
+  }
+
   static String _edgeKey(String a, String b) =>
       a.compareTo(b) < 0 ? '$a|$b' : '$b|$a';
 
@@ -230,9 +274,20 @@ class GalaxyPainter extends CustomPainter {
   void _drawNode(Canvas canvas, _NodePosition node) {
     final isSelected = node.person.id == selectedId;
     final isRoot = node.person.id == 'root';
+    final isRelated = relatedIds.contains(node.person.id);
     final color = GalaxyLayoutEngine.generationColor(node.generation);
     final r = node.radius;
     final center = node.center;
+
+    // 焦点模式: 计算透明度
+    double opacity = 1.0;
+    if (selectedId != null) {
+      if (isSelected || isRelated) {
+        opacity = 1.0; // 选中节点或关联节点保持不透明
+      } else {
+        opacity = 0.15; // 无关节点降低透明度
+      }
+    }
 
     // Glow for selected / root
     if (isSelected || isRoot) {
@@ -245,13 +300,15 @@ class GalaxyPainter extends CustomPainter {
     // Background fill
     final bgPaint = Paint()
       ..color = isRoot
-          ? color.withValues(alpha: 0.9)
-          : const Color(0xFF1A2030).withValues(alpha: 0.96);
+          ? color.withValues(alpha: 0.9 * opacity)
+          : Color.fromRGBO(26, 32, 48, (0.96 * opacity).toDouble());
     canvas.drawCircle(center, r, bgPaint);
 
     // Border ring
     final borderPaint = Paint()
-      ..color = isSelected ? Colors.white : color
+      ..color = isSelected 
+          ? Colors.white.withValues(alpha: opacity)
+          : color.withValues(alpha: opacity)
       ..style = PaintingStyle.stroke
       ..strokeWidth = isSelected ? 2.5 : 1.5;
     canvas.drawCircle(center, r, borderPaint);
@@ -265,7 +322,7 @@ class GalaxyPainter extends CustomPainter {
       text: TextSpan(
         text: name.length > 4 ? '${name.substring(0, 3)}…' : name,
         style: TextStyle(
-          color: isRoot ? Colors.white : color,
+          color: (isRoot ? Colors.white : color).withValues(alpha: opacity),
           fontSize: fontSize,
           fontWeight: isRoot ? FontWeight.bold : FontWeight.w500,
           height: 1.2,
@@ -281,7 +338,7 @@ class GalaxyPainter extends CustomPainter {
       text: TextSpan(
         text: rel.length > 4 ? rel.substring(0, 4) : rel,
         style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.5),
+          color: Colors.white.withValues(alpha: 0.5 * opacity),
           fontSize: math.max(7.0, fontSize - 2),
           height: 1.2,
         ),
@@ -310,7 +367,8 @@ class GalaxyPainter extends CustomPainter {
         oldDelegate.selectedId != selectedId ||
         oldDelegate.people != people ||
         oldDelegate.highlightedIds != highlightedIds ||
-        oldDelegate.breathPhase != breathPhase;
+        oldDelegate.breathPhase != breathPhase ||
+        oldDelegate.relatedIds != relatedIds;
   }
 }
 
@@ -327,7 +385,7 @@ class FamilyTreeView extends StatefulWidget {
 }
 
 class _FamilyTreeViewState extends State<FamilyTreeView>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   // 布局刷新种子
   int _layoutSeed = DateTime.now().millisecondsSinceEpoch;
 
@@ -337,6 +395,13 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
 
   // 呼吸灯动画
   late final AnimationController _breathCtrl;
+  
+  // 焦点模式: 选中节点的缩放动画
+  late final AnimationController _scaleCtrl;
+  String? _focusedId; // 当前焦点节点ID
+  
+  // 详细信息侧边栏显示控制
+  bool _showDetailSidebar = false;
 
   @override
   void initState() {
@@ -348,13 +413,47 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat();
+    
+    // 缩放动画控制器
+    _scaleCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
     _breathCtrl.dispose();
+    _scaleCtrl.dispose();
     super.dispose();
+  }
+  
+  // 获取关联节点ID集合 (父母、子女、配偶)
+  Set<String> _getRelatedIds(String personId) {
+    final related = <String>{};
+    final person = widget.controller.getPerson(personId);
+    if (person == null) return related;
+    
+    // 添加父母
+    related.addAll(person.parents);
+    
+    // 添加子女
+    related.addAll(person.children);
+    
+    // 添加配偶 (通过子女反向查找)
+    for (final childId in person.children) {
+      final child = widget.controller.getPerson(childId);
+      if (child != null) {
+        for (final parentId in child.parents) {
+          if (parentId != personId) {
+            related.add(parentId);
+          }
+        }
+      }
+    }
+    
+    return related;
   }
 
   void _refreshLayout() {
@@ -391,11 +490,30 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
   /// Given a canvas position and a list of nodes, return the tapped person id.
   String? _hitTest(Offset localPos, List<_NodePosition> nodes) {
     for (final node in nodes.reversed) {
-      if ((localPos - node.center).distance <= node.radius) {
+      // 考虑缩放后的半径进行命中测试
+      final effectiveRadius = node.person.id == _focusedId 
+          ? node.radius * 1.2 
+          : node.radius;
+      if ((localPos - node.center).distance <= effectiveRadius) {
         return node.person.id;
       }
     }
     return null;
+  }
+  
+  // 显示详细信息侧边栏
+  void _showPersonDetail() {
+    setState(() {
+      _showDetailSidebar = true;
+    });
+  }
+  
+  // 关闭详细信息侧边栏
+  void _closeDetailSidebar() {
+    setState(() {
+      _showDetailSidebar = false;
+    });
+    widget.controller.clearSelection();
   }
 
   @override
@@ -448,6 +566,24 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       .map((p) => p.id)
                       .toSet();
               
+              // 焦点模式: 获取关联节点
+              final relatedIds = _focusedId != null ? _getRelatedIds(_focusedId!) : <String>{};
+              
+              // 应用缩放动画到节点
+              final animatedNodes = nodes.map((node) {
+                if (node.person.id == _focusedId) {
+                  final scale = 1.0 + (_scaleCtrl.value * 0.2); // 1.0 -> 1.2
+                  return _NodePosition(
+                    person: node.person,
+                    center: node.center,
+                    radius: node.radius * scale,
+                    steps: node.steps,
+                    generation: node.generation,
+                  );
+                }
+                return node;
+              }).toList();
+              
               return Stack(
                 children: [
                   // 0. 刷新按鈕 (左上角)
@@ -472,21 +608,34 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                         onTapUp: (details) {
                           final id = _hitTest(details.localPosition, nodes);
                           if (id != null) {
+                            // 焦点模式: 点击节点只设置焦点，不弹出侧边栏
+                            setState(() {
+                              _focusedId = id;
+                              _showDetailSidebar = false;
+                            });
                             widget.controller.selectPerson(id);
+                            _scaleCtrl.forward(from: 0.0);
                           } else {
+                            // 点击空白处清除焦点
+                            setState(() {
+                              _focusedId = null;
+                              _showDetailSidebar = false;
+                            });
                             widget.controller.clearSelection();
+                            _scaleCtrl.reverse();
                           }
                         },
                         child: AnimatedBuilder(
-                          animation: _breathCtrl,
+                          animation: Listenable.merge([_breathCtrl, _scaleCtrl]),
                           builder: (context, _) => CustomPaint(
                             size: canvasSize,
                             painter: GalaxyPainter(
-                              nodes: nodes,
+                              nodes: animatedNodes,
                               people: widget.controller.allPeople,
-                              selectedId: selectedId,
+                              selectedId: _focusedId,
                               highlightedIds: highlightedIds,
                               breathPhase: _breathCtrl.value,
+                              relatedIds: relatedIds,
                             ),
                           ),
                         ),
@@ -545,8 +694,73 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                     ),
                   ),
               
-                  // 3. Detail sidebar
-                  if (latestSelectedPerson != null)
+                  // 3. 底部浮动毛玻璃按钮 (仅在选中节点时显示)
+                  if (_focusedId != null && !_showDetailSidebar)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 40,
+                      child: Center(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(28),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                width: 1,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                  blurRadius: 20,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: _showPersonDetail,
+                                  borderRadius: BorderRadius.circular(28),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 32,
+                                      vertical: 16,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          '显示详细信息',
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(alpha: 0.9),
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Icon(
+                                          Icons.chevron_right,
+                                          color: Colors.white.withValues(alpha: 0.7),
+                                          size: 20,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  
+                  // 4. Detail sidebar (仅点击按钮后显示)
+                  if (_showDetailSidebar && latestSelectedPerson != null)
                     Positioned(
                       right: 0,
                       top: 0,
@@ -554,7 +768,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       child: PersonDetailsSidebar(
                         person: latestSelectedPerson,
                         controller: widget.controller,
-                        onClose: () => widget.controller.clearSelection(),
+                        onClose: _closeDetailSidebar,
                         onAddParent: () =>
                             _showAddParentDialog(context, latestSelectedPerson.id),
                         onAddChild: () =>
