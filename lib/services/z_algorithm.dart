@@ -228,8 +228,6 @@ class TieredRippleLayout {
     return 3;
   }
 
-  /// 仅通过血缘路径计算层级 (不含姻亲继承, 避免循环递归)
-  
   /// 硬核防重叠检测
   bool _checkCollision(Offset candidate, double radius, List<NodeLayoutData> placed) {
     for (final node in placed) {

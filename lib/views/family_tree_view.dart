@@ -83,7 +83,7 @@ class GalaxyLayoutEngine {
 }
 
 // ─────────────────────────────────────────────
-// Galaxy Painter  (v3 – Focus Mode)
+// Galaxy Painter  (v5 – Detail-Panel Aligned Highlighting)
 // ─────────────────────────────────────────────
 class GalaxyPainter extends CustomPainter {
   final List<_NodePosition> nodes;
@@ -93,10 +93,6 @@ class GalaxyPainter extends CustomPainter {
   final Set<String> highlightedIds;
   // 呼吸灯动画进度 [0, 1]
   final double breathPhase;
-  // 焦点模式: 关联节点ID集合
-  final Set<String> relatedIds;
-  // 预计算的配偶关系映射 (personId -> spouseIds)
-  final Map<String, Set<String>> spouseMap;
 
   const GalaxyPainter({
     required this.nodes,
@@ -104,9 +100,152 @@ class GalaxyPainter extends CustomPainter {
     this.selectedId,
     this.highlightedIds = const {},
     this.breathPhase = 0.0,
-    this.relatedIds = const {},
-    this.spouseMap = const {},
   });
+
+  // 快速查找: id -> Person
+  Map<String, Person> get _personById => {
+    for (final p in people) p.id: p,
+  };
+
+  // ========== 关系计算 (与详细信息面板完全对齐) ==========
+  
+  // 获取配偶ID集合 (使用详细信息面板相同的算法)
+  Set<String> _getSpouseIds(Person p) {
+    final spouses = <String>{};
+    // 通过子女反向查找配偶
+    for (final childId in p.children) {
+      final child = _personById[childId];
+      if (child != null) {
+        for (final parentId in child.parents) {
+          if (parentId != p.id) {
+            spouses.add(parentId);
+          }
+        }
+      }
+    }
+    return spouses;
+  }
+
+  // 获取父母ID集合 (包含父母的配偶)
+  Set<String> _getParentIds(Person p) {
+    final parentIds = <String>{};
+    // 先加直接关联的父母
+    for (final id in p.parents) {
+      final parent = _personById[id];
+      if (parent != null) {
+        parentIds.add(id);
+        // 关键：顺便把父母的配偶也算进来（解决舅舅只有外婆没有外公的问题）
+        for (final spouseChildId in parent.children) {
+          final spouseChild = _personById[spouseChildId];
+          if (spouseChild != null) {
+            for (final otherParentId in spouseChild.parents) {
+              if (otherParentId != id) {
+                parentIds.add(otherParentId);
+              }
+            }
+          }
+        }
+      }
+    }
+    return parentIds;
+  }
+
+  // 获取子女ID集合 (包含配偶的孩子)
+  Set<String> _getChildrenIds(Person p) {
+    final childrenIds = <String>{};
+    // 自己的孩子
+    for (final id in p.children) {
+      childrenIds.add(id);
+    }
+    // 探测配偶的孩子（解决配偶的孩子也是我的孩子）
+    for (final childId in p.children) {
+      final child = _personById[childId];
+      if (child != null) {
+        for (final parentId in child.parents) {
+          if (parentId != p.id) {
+            final spouse = _personById[parentId];
+            if (spouse != null) {
+              for (final sChildId in spouse.children) {
+                childrenIds.add(sChildId);
+              }
+            }
+          }
+        }
+      }
+    }
+    return childrenIds;
+  }
+
+  // 获取兄弟姐妹ID集合
+  Set<String> _getSiblingIds(Person p) {
+    final siblingIds = <String>{};
+    if (p.parents.isEmpty) return siblingIds;
+    
+    for (final parentId in p.parents) {
+      final parent = _personById[parentId];
+      if (parent != null) {
+        for (final childId in parent.children) {
+          if (childId != p.id) {
+            siblingIds.add(childId);
+          }
+        }
+      }
+    }
+    return siblingIds;
+  }
+
+  // 预计算所有需要连线的关系 (双向指针映射)
+  // key: personId, value: 需要与之连线的节点ID集合
+  Map<String, Set<String>> _buildConnectionMap() {
+    final map = <String, Set<String>>{};
+    
+    for (final person in people) {
+      final connections = <String>{};
+      
+      // 1. 父母连线
+      connections.addAll(_getParentIds(person));
+      
+      // 2. 子女连线
+      connections.addAll(_getChildrenIds(person));
+      
+      // 3. 配偶连线
+      connections.addAll(_getSpouseIds(person));
+      
+      if (connections.isNotEmpty) {
+        map[person.id] = connections;
+      }
+    }
+    
+    return map;
+  }
+
+  // 预计算所有关联节点 (用于高亮)
+  // 包含: 父母、子女、配偶、兄弟姐妹
+  Set<String> _buildRelatedSet(String personId) {
+    final related = <String>{};
+    final person = _personById[personId];
+    if (person == null) return related;
+    
+    // 父母
+    related.addAll(_getParentIds(person));
+    // 子女
+    related.addAll(_getChildrenIds(person));
+    // 配偶
+    related.addAll(_getSpouseIds(person));
+    // 兄弟姐妹 (高亮但不连线)
+    related.addAll(_getSiblingIds(person));
+    
+    return related;
+  }
+
+  // 检查 targetId 是否与选中的人有关联 (用于节点高亮)
+  bool _isRelated(String targetId) {
+    if (selectedId == null) return false;
+    if (targetId == selectedId) return true;
+    
+    final related = _buildRelatedSet(selectedId!);
+    return related.contains(targetId);
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -163,7 +302,8 @@ class GalaxyPainter extends CustomPainter {
   }
 
   // ── Kinship lines ────────────────────────────
-  // 直线连线: 仅在 Parent-Child 和 Spouse-Spouse 之间绘制
+  // 直线连线: 使用与详细信息面板完全相同的算法
+  // 兄弟姐妹之间不画线，只高亮节点
   // 样式: 统一使用 Colors.grey.withOpacity(0.3)
   void _drawKinshipLines(Canvas canvas) {
     // Build fast id → center lookup
@@ -173,56 +313,35 @@ class GalaxyPainter extends CustomPainter {
 
     // Track drawn pairs to avoid duplicates
     final Set<String> drawn = {};
+    
+    // 预计算连线关系
+    final connectionMap = _buildConnectionMap();
 
     for (final person in people) {
       final fromPos = centerOf[person.id];
       if (fromPos == null) continue;
 
-      // Parent-Child 直线
-      for (final childId in person.children) {
-        final toPos = centerOf[childId];
+      // 获取所有需要连线的人 (父母、子女、配偶)
+      final connections = connectionMap[person.id] ?? <String>{};
+
+      for (final targetId in connections) {
+        final toPos = centerOf[targetId];
         if (toPos == null) continue;
         
-        final key = _edgeKey(person.id, childId);
+        final key = _edgeKey(person.id, targetId);
         if (drawn.add(key)) {
-          // 焦点模式: 关联节点的连线高亮为白色
-          final isRelated = selectedId != null && 
-              ((person.id == selectedId && relatedIds.contains(childId)) ||
-               (childId == selectedId && relatedIds.contains(person.id)));
+          // 高亮条件: 选中的人是连线的一端
+          final isHighlighted = selectedId != null && 
+              (person.id == selectedId || targetId == selectedId);
           
           final linePaint = Paint()
-            ..color = isRelated 
+            ..color = isHighlighted 
                 ? Colors.white.withValues(alpha: 0.8)
                 : Colors.grey.withValues(alpha: 0.3)
-            ..strokeWidth = isRelated ? 2.0 : 1.0
+            ..strokeWidth = isHighlighted ? 2.0 : 1.0
             ..style = PaintingStyle.stroke;
           
           canvas.drawLine(fromPos, toPos, linePaint);
-        }
-      }
-
-      // Spouse-Spouse 直线 (使用预计算的配偶关系)
-      final spouseIds = spouseMap[person.id] ?? <String>{};
-      
-      // 绘制配偶连线
-      for (final spouseId in spouseIds) {
-        final toPos = centerOf[spouseId];
-        if (toPos != null) {
-          final key = _edgeKey(person.id, spouseId);
-          if (drawn.add(key)) {
-            // 焦点模式: 配偶连线高亮
-            final isSpouseRelated = selectedId != null && 
-                (person.id == selectedId || spouseId == selectedId);
-            
-            final spousePaint = Paint()
-              ..color = isSpouseRelated
-                  ? Colors.white.withValues(alpha: 0.8)
-                  : Colors.grey.withValues(alpha: 0.3)
-              ..strokeWidth = isSpouseRelated ? 2.0 : 1.0
-              ..style = PaintingStyle.stroke;
-            
-            canvas.drawLine(fromPos, toPos, spousePaint);
-          }
         }
       }
     }
@@ -280,7 +399,8 @@ class GalaxyPainter extends CustomPainter {
   void _drawNode(Canvas canvas, _NodePosition node) {
     final isSelected = node.person.id == selectedId;
     final isRoot = node.person.id == 'root';
-    final isRelated = relatedIds.contains(node.person.id);
+    // 使用双向指针判定关联关系 (直接关联 + 兄弟姐妹)
+    final isRelated = _isRelated(node.person.id);
     final color = GalaxyLayoutEngine.generationColor(node.generation);
     final r = node.radius;
     final center = node.center;
@@ -373,9 +493,7 @@ class GalaxyPainter extends CustomPainter {
         oldDelegate.selectedId != selectedId ||
         oldDelegate.people != people ||
         oldDelegate.highlightedIds != highlightedIds ||
-        oldDelegate.breathPhase != breathPhase ||
-        oldDelegate.relatedIds != relatedIds ||
-        oldDelegate.spouseMap != spouseMap;
+        oldDelegate.breathPhase != breathPhase;
   }
 }
 
@@ -436,70 +554,6 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     super.dispose();
   }
   
-  // 预计算所有配偶关系 (personId -> spouseIds)
-  Map<String, Set<String>> _buildSpouseMap() {
-    final spouseMap = <String, Set<String>>{};
-    final allPeople = widget.controller.allPeople;
-    
-    for (final person in allPeople) {
-      final spouseIds = <String>{};
-      
-      // 方式1: 直接通过 spouse 字段
-      if (person.spouse != null && person.spouse!.isNotEmpty) {
-        spouseIds.add(person.spouse!);
-      }
-      
-      // 方式2: 通过子女反向查找
-      for (final childId in person.children) {
-        final child = widget.controller.getPerson(childId);
-        if (child != null) {
-          for (final parentId in child.parents) {
-            if (parentId != person.id) {
-              spouseIds.add(parentId);
-            }
-          }
-        }
-      }
-      
-      if (spouseIds.isNotEmpty) {
-        spouseMap[person.id] = spouseIds;
-      }
-    }
-    
-    return spouseMap;
-  }
-
-  // 获取关联节点ID集合 (父母、子女、配偶、兄弟姐妹)
-  Set<String> _getRelatedIds(String personId, Map<String, Set<String>> spouseMap) {
-    final related = <String>{};
-    final person = widget.controller.getPerson(personId);
-    if (person == null) return related;
-    
-    // 添加父母
-    related.addAll(person.parents);
-    
-    // 添加子女
-    related.addAll(person.children);
-    
-    // 添加配偶 (从预计算的配偶关系中获取)
-    final spouseIds = spouseMap[personId] ?? <String>{};
-    related.addAll(spouseIds);
-    
-    // 添加兄弟姐妹 (通过父母查找)
-    for (final parentId in person.parents) {
-      final parent = widget.controller.getPerson(parentId);
-      if (parent != null) {
-        for (final siblingId in parent.children) {
-          if (siblingId != personId) {
-            related.add(siblingId);
-          }
-        }
-      }
-    }
-    
-    return related;
-  }
-
   void _refreshLayout() {
     setState(() {
       _layoutSeed = DateTime.now().millisecondsSinceEpoch;
@@ -610,11 +664,8 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       .map((p) => p.id)
                       .toSet();
               
-              // 预计算配偶关系
-              final spouseMap = _buildSpouseMap();
-              
-              // 焦点模式: 获取关联节点
-              final relatedIds = _focusedId != null ? _getRelatedIds(_focusedId!, spouseMap) : <String>{};
+              // 注意: 现在 GalaxyPainter 内部通过双向指针判定关联关系
+              // 不再需要外部传入 relatedIds 和 spouseMap
               
               // 应用缩放动画到节点
               final animatedNodes = nodes.map((node) {
@@ -682,8 +733,6 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                               selectedId: _focusedId,
                               highlightedIds: highlightedIds,
                               breathPhase: _breathCtrl.value,
-                              relatedIds: relatedIds,
-                              spouseMap: spouseMap,
                             ),
                           ),
                         ),
