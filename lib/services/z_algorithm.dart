@@ -108,11 +108,15 @@ class TieredRippleLayout {
 
   TieredRippleLayout({int? seed}) : _random = math.Random(seed);
 
-  /// 计算节点层级 (T1, T2, T3)
+ /// 计算节点层级 (T1, T2, T3)
   /// 
   /// T1 (38dp): 我、父母、配偶、亲兄妹、子女
   /// T2 (28dp): 祖父母、姑/舅、表/堂亲
   /// T3 (18dp): 其他
+  ///
+  /// Fix 1 - 姻亲等级继承: 若一人初判为 T3，但其配偶为 T1/T2，则继承配偶等级
+  /// Fix 2 - 表亲双路径: 无论表弟的父母是"大姑"还是"大姑父"被录入系统，都能正确识别为 T2
+  /// Fix 3 - 祖辈辈分推断: 利用 relationship 字段关键词兜底，解决 AI 无法判断关系时辈分错乱
   int _calculateTier(Person person, Map<String, Person> byId, String rootId) {
     // Root 永远是 T1
     if (person.id == rootId) return 1;
@@ -142,7 +146,7 @@ class TieredRippleLayout {
       final parent = byId[parentId];
       if (parent != null) {
         if (parent.parents.contains(person.id)) return 2; // 祖父母
-        if (parent.spouse == person.id) return 2; // 父母的配偶
+        if (parent.spouse == person.id) return 2; // 父母的配偶 (继父母等)
       }
     }
 
@@ -159,28 +163,149 @@ class TieredRippleLayout {
       }
     }
 
-    // 检查是否为表/堂亲 (姑/舅的子女)
-    for (final parentId in root.parents) {
-      final parent = byId[parentId];
-      if (parent != null) {
-        for (final grandparentId in parent.parents) {
-          final grandparent = byId[grandparentId];
-          if (grandparent != null) {
-            for (final auntUncleId in grandparent.children) {
-              if (auntUncleId != parentId) { // 排除父母自己
-                final auntUncle = byId[auntUncleId];
-                if (auntUncle != null && auntUncle.children.contains(person.id)) {
-                  return 2; // 表/堂亲
-                }
-              }
+    // ── Fix 2: 表/堂亲双路径检查 ──────────────────────────────────
+    // 路径 A: 通过血亲侧（姑/舅是血亲子女）
+    // 路径 B: 通过姻亲侧（姑/舅的配偶被录入系统，其配偶是父母的兄妹）
+    // 只要 person 的父母中任意一人是"父母的兄妹"或"父母兄妹的配偶"，该人即为 T2
+    for (final personParentId in person.parents) {
+      final personParent = byId[personParentId];
+      if (personParent == null) continue;
+
+      // 路径 A: personParent 是 root 的父母的兄妹 (血亲姑/舅)
+      for (final rootParentId in root.parents) {
+        final rootParent = byId[rootParentId];
+        if (rootParent == null) continue;
+        for (final gpId in rootParent.parents) {
+          final gp = byId[gpId];
+          if (gp != null && gp.children.contains(personParentId)) {
+            return 2; // 表/堂亲 (血亲路径)
+          }
+        }
+      }
+
+      // 路径 B: personParent 的配偶是 root 的父母的兄妹 (姻亲路径，小姑父→表弟)
+      if (personParent.spouse != null) {
+        final personParentSpouseId = personParent.spouse!;
+        for (final rootParentId in root.parents) {
+          final rootParent = byId[rootParentId];
+          if (rootParent == null) continue;
+          for (final gpId in rootParent.parents) {
+            final gp = byId[gpId];
+            if (gp != null && gp.children.contains(personParentSpouseId)) {
+              return 2; // 表/堂亲 (姻亲路径)
             }
           }
         }
       }
     }
 
+    // ── Fix 1: 姻亲等级继承 ──────────────────────────────────────
+    // 若当前节点初判为 T3，但其配偶已经是 T1/T2，则继承配偶等级
+    // 这确保了「小姑父」与「小姑」始终同等级、同大小
+    if (person.spouse != null) {
+      final spouse = byId[person.spouse!];
+      if (spouse != null) {
+        final spouseTier = _calculateTierBloodOnly(spouse, byId, rootId);
+        if (spouseTier < 3) return spouseTier;
+      }
+    }
+
+    // ── Fix 3: relationship 关键词辅助兜底 ──────────────────────
+    // 当 AI 录入时只知道存在某人但无法建立完整关系链时，
+    // 通过 relationship 字段中的辅助关键词进行层级推断
+    final tier = _inferTierFromRelationship(person.relationship);
+    if (tier != null) return tier;
+
     // 其他为 T3
     return 3;
+  }
+
+  /// 仅通过血缘路径计算层级 (不含姻亲继承, 避免循环递归)
+  int _calculateTierBloodOnly(Person person, Map<String, Person> byId, String rootId) {
+    if (person.id == rootId) return 1;
+    final root = byId[rootId];
+    if (root == null) return 3;
+
+    if (root.spouse == person.id) return 1;
+    if (root.parents.contains(person.id)) return 1;
+    if (root.children.contains(person.id)) return 1;
+
+    for (final parentId in root.parents) {
+      final parent = byId[parentId];
+      if (parent != null && parent.children.contains(person.id)) return 1;
+    }
+
+    for (final parentId in root.parents) {
+      final parent = byId[parentId];
+      if (parent != null) {
+        if (parent.parents.contains(person.id)) return 2;
+        if (parent.spouse == person.id) return 2;
+      }
+    }
+
+    for (final parentId in root.parents) {
+      final parent = byId[parentId];
+      if (parent != null) {
+        for (final gpId in parent.parents) {
+          final gp = byId[gpId];
+          if (gp != null && gp.children.contains(person.id)) return 2;
+        }
+      }
+    }
+
+    // 表/堂亲血亲路径
+    for (final personParentId in person.parents) {
+      for (final rootParentId in root.parents) {
+        final rootParent = byId[rootParentId];
+        if (rootParent == null) continue;
+        for (final gpId in rootParent.parents) {
+          final gp = byId[gpId];
+          if (gp != null && gp.children.contains(personParentId)) return 2;
+        }
+      }
+    }
+
+    return 3;
+  }
+
+  /// 通过 relationship 字段关键词推断层级
+  /// 解决 AI 无法建立完整关系链时（如"老太"只知道是某人的父亲）的辈分错乱问题
+  int? _inferTierFromRelationship(String relationship) {
+    final rel = relationship.toLowerCase();
+
+    // T1 关键词：直系亲属
+    const t1Keywords = [
+      '父亲', '母亲', '爸爸', '妈妈', '老爸', '老妈',
+      '儿子', '女儿', '配偶', '丈夫', '妻子', '老公', '老婆',
+      '兄弟', '姐妹', '哥哥', '弟弟', '姐姐', '妹妹',
+      'father', 'mother', 'son', 'daughter', 'husband', 'wife', 'sibling',
+    ];
+    for (final kw in t1Keywords) {
+      if (rel.contains(kw)) return 1;
+    }
+
+    // T2 关键词：祖辈、姑舅、表堂
+    const t2Keywords = [
+      '爷爷', '奶奶', '姥爷', '外公', '姥姥', '外婆', '祖父', '祖母', '外祖',
+      '姑姑', '姑父', '舅舅', '舅妈', '姨妈', '姨夫', '伯父', '叔叔', '伯伯',
+      '表哥', '表弟', '表姐', '表妹', '堂哥', '堂弟', '堂姐', '堂妹',
+      '叔父', '大伯', '二伯', '大叔', '二叔',
+      'grandfather', 'grandmother', 'grandpa', 'grandma', 'uncle', 'aunt', 'cousin',
+    ];
+    for (final kw in t2Keywords) {
+      if (rel.contains(kw)) return 2;
+    }
+
+    // T2 关键词：曾祖辈（按T2处理，避免完全消失在T3边缘）
+    const t2AncestorKeywords = [
+      '老太', '太爷', '太奶', '曾祖', '高祖', '外曾祖', '外太',
+      'great-grand', 'great grand',
+    ];
+    for (final kw in t2AncestorKeywords) {
+      if (rel.contains(kw)) return 2;
+    }
+
+    return null; // 无法推断
   }
 
   /// 硬核防重叠检测

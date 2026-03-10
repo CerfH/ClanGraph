@@ -8,6 +8,14 @@ import '../widgets/person_dialog.dart';
 import '../theme/app_theme.dart';
 import 'ai_assistant_view.dart';
 
+// 搜索匹配算法: 匹配 name 或 relationship (case-insensitive)
+bool _personMatchesQuery(Person p, String query) {
+  if (query.isEmpty) return false;
+  final q = query.toLowerCase();
+  return p.name.toLowerCase().contains(q) ||
+      p.relationship.toLowerCase().contains(q);
+}
+
 // ─────────────────────────────────────────────
 // Data model for a positioned node
 // ─────────────────────────────────────────────
@@ -79,13 +87,18 @@ class GalaxyLayoutEngine {
 class GalaxyPainter extends CustomPainter {
   final List<_NodePosition> nodes;
   final String? selectedId;
-  // Raw person list for drawing kinship edges
   final List<Person> people;
+  // 搜索高亮: 匹配到的节点 ID 集合
+  final Set<String> highlightedIds;
+  // 呼吸灯动画进度 [0, 1]
+  final double breathPhase;
 
   const GalaxyPainter({
     required this.nodes,
     required this.people,
     this.selectedId,
+    this.highlightedIds = const {},
+    this.breathPhase = 0.0,
   });
 
   @override
@@ -98,12 +111,17 @@ class GalaxyPainter extends CustomPainter {
     // Layer 2 – orbit rings (compact radii)
     _drawOrbitRings(canvas, center);
 
-    // Layer 3 – kinship lines (below nodes)
+    // Layer 3 – kinship lines (直线, below nodes)
     _drawKinshipLines(canvas);
 
     // Layer 4 – nodes on top
     for (final node in nodes) {
       _drawNode(canvas, node);
+    }
+
+    // Layer 5 – 高亮外环 (呼吸灯)
+    if (highlightedIds.isNotEmpty) {
+      _drawHighlightRings(canvas);
     }
   }
 
@@ -138,16 +156,13 @@ class GalaxyPainter extends CustomPainter {
   void _drawKinshipLines(Canvas canvas) {
     // 淡灰色贝塞尔曲线
     final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.25)
-      ..strokeWidth = 1.2
+      ..color = Colors.white.withValues(alpha: 0.22)
+      ..strokeWidth = 1.0
       ..style = PaintingStyle.stroke;
 
     // Build fast id → center lookup
     final Map<String, Offset> centerOf = {
       for (final n in nodes) n.person.id: n.center
-    };
-    final Map<String, double> radiusOf = {
-      for (final n in nodes) n.person.id: n.radius
     };
 
     // Track drawn pairs to avoid duplicates
@@ -164,59 +179,48 @@ class GalaxyPainter extends CustomPainter {
         
         final key = _edgeKey(person.id, childId);
         if (drawn.add(key)) {
-          _drawBezierCurve(canvas, fromPos, toPos, radiusOf[person.id] ?? 0, 
-              radiusOf[childId] ?? 0, linePaint);
+          canvas.drawLine(fromPos, toPos, linePaint);
         }
       }
 
-      // Spouse-Spouse 贝塞尔曲线
+      // Spouse-Spouse 直线 (粉色区分配偶关系)
       if (person.spouse != null) {
         final toPos = centerOf[person.spouse!];
         if (toPos != null) {
           final key = _edgeKey(person.id, person.spouse!);
           if (drawn.add(key)) {
-            _drawBezierCurve(canvas, fromPos, toPos, radiusOf[person.id] ?? 0,
-                radiusOf[person.spouse!] ?? 0, linePaint);
+            final spousePaint = Paint()
+              ..color = Colors.pinkAccent.withValues(alpha: 0.30)
+              ..strokeWidth = 1.0
+              ..style = PaintingStyle.stroke;
+            canvas.drawLine(fromPos, toPos, spousePaint);
           }
         }
       }
     }
   }
 
-  /// 绘制穿过圆圈下方的贝塞尔曲线
-  void _drawBezierCurve(Canvas canvas, Offset from, Offset to, 
-                        double fromRadius, double toRadius, Paint paint) {
-    // 计算方向向量
-    final dx = to.dx - from.dx;
-    final dy = to.dy - from.dy;
-    final distance = math.sqrt(dx * dx + dy * dy);
-    
-    if (distance < 1) return;
+  // ── 高亮外环 (呼吸灯效果) ──────────────────
+  void _drawHighlightRings(Canvas canvas) {
+    final pulse = 0.5 + 0.5 * math.sin(breathPhase * 2 * math.pi);
+    final ringAlpha = 0.4 + 0.5 * pulse;
+    final ringExpand = 4.0 + 5.0 * pulse;
 
-    // 单位向量
-    final ux = dx / distance;
-    final uy = dy / distance;
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
 
-    // 起点和终点 (从圆圈边缘开始, 穿过下方)
-    final start = Offset(
-      from.dx + ux * fromRadius,
-      from.dy + uy * fromRadius + fromRadius * 0.3, // 稍微向下偏移
-    );
-    final end = Offset(
-      to.dx - ux * toRadius,
-      to.dy - uy * toRadius + toRadius * 0.3, // 稍微向下偏移
-    );
-
-    // 控制点: 使曲线向下弯曲
-    final midX = (start.dx + end.dx) / 2;
-    final midY = (start.dy + end.dy) / 2;
-    final controlY = midY + distance * 0.15; // 向下弯曲
-
-    final path = Path()
-      ..moveTo(start.dx, start.dy)
-      ..quadraticBezierTo(midX, controlY, end.dx, end.dy);
-
-    canvas.drawPath(path, paint);
+    for (final node in nodes) {
+      if (!highlightedIds.contains(node.person.id)) continue;
+      final color = GalaxyLayoutEngine.generationColor(node.generation)
+          .withValues(alpha: ringAlpha);
+      ringPaint.color = color;
+      canvas.drawCircle(node.center, node.radius + ringExpand, ringPaint);
+      final glowPaint = Paint()
+        ..color = color.withValues(alpha: ringAlpha * 0.4)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      canvas.drawCircle(node.center, node.radius + ringExpand + 4, glowPaint);
+    }
   }
 
   static String _edgeKey(String a, String b) =>
@@ -304,7 +308,9 @@ class GalaxyPainter extends CustomPainter {
   bool shouldRepaint(covariant GalaxyPainter oldDelegate) {
     return oldDelegate.nodes != nodes ||
         oldDelegate.selectedId != selectedId ||
-        oldDelegate.people != people;
+        oldDelegate.people != people ||
+        oldDelegate.highlightedIds != highlightedIds ||
+        oldDelegate.breathPhase != breathPhase;
   }
 }
 
@@ -320,9 +326,36 @@ class FamilyTreeView extends StatefulWidget {
   State<FamilyTreeView> createState() => _FamilyTreeViewState();
 }
 
-class _FamilyTreeViewState extends State<FamilyTreeView> {
+class _FamilyTreeViewState extends State<FamilyTreeView>
+    with SingleTickerProviderStateMixin {
   // 布局刷新种子
   int _layoutSeed = DateTime.now().millisecondsSinceEpoch;
+
+  // 搜索相关
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  // 呼吸灯动画
+  late final AnimationController _breathCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(() {
+      setState(() => _searchQuery = _searchCtrl.text.trim());
+    });
+    _breathCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _breathCtrl.dispose();
+    super.dispose();
+  }
 
   void _refreshLayout() {
     setState(() {
@@ -406,10 +439,18 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
                 generationMap: generationMap,
                 seed: _layoutSeed,
               );
-
+              
+              // 搜索高亮: 匹配到的节点 ID
+              final highlightedIds = _searchQuery.isEmpty
+                  ? <String>{}
+                  : widget.controller.allPeople
+                      .where((p) => _personMatchesQuery(p, _searchQuery))
+                      .map((p) => p.id)
+                      .toSet();
+              
               return Stack(
                 children: [
-                  // 0. 刷新按钮 (左上角)
+                  // 0. 刷新按鈕 (左上角)
                   Positioned(
                     top: 20,
                     left: 20,
@@ -419,7 +460,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
                       tooltip: '刷新布局',
                     ),
                   ),
-
+              
                   // 1. Galaxy canvas (interactive)
                   Positioned.fill(
                     child: InteractiveViewer(
@@ -436,19 +477,75 @@ class _FamilyTreeViewState extends State<FamilyTreeView> {
                             widget.controller.clearSelection();
                           }
                         },
-                        child: CustomPaint(
-                          size: canvasSize,
-                          painter: GalaxyPainter(
-                            nodes: nodes,
-                            people: widget.controller.allPeople,
-                            selectedId: selectedId,
+                        child: AnimatedBuilder(
+                          animation: _breathCtrl,
+                          builder: (context, _) => CustomPaint(
+                            size: canvasSize,
+                            painter: GalaxyPainter(
+                              nodes: nodes,
+                              people: widget.controller.allPeople,
+                              selectedId: selectedId,
+                              highlightedIds: highlightedIds,
+                              breathPhase: _breathCtrl.value,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-
-                  // 2. Detail sidebar
+              
+                  // 2. 搜索框 (顶部中间, 半透明毛玻璃)
+                  Positioned(
+                    top: 16,
+                    left: 70,
+                    right: 70,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            width: 1,
+                          ),
+                        ),
+                        child: TextField(
+                          controller: _searchCtrl,
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: '搜索姓名或关系…',
+                            hintStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.4),
+                              fontSize: 14,
+                            ),
+                            prefixIcon: Icon(
+                              Icons.search,
+                              color: Colors.white.withValues(alpha: 0.5),
+                              size: 18,
+                            ),
+                            suffixIcon: _searchQuery.isNotEmpty
+                                ? IconButton(
+                                    icon: Icon(
+                                      Icons.close,
+                                      color: Colors.white.withValues(alpha: 0.6),
+                                      size: 16,
+                                    ),
+                                    onPressed: () => _searchCtrl.clear(),
+                                  )
+                                : null,
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              
+                  // 3. Detail sidebar
                   if (latestSelectedPerson != null)
                     Positioned(
                       right: 0,
