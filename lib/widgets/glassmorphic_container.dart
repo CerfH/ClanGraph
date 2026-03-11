@@ -95,10 +95,9 @@ class SearchGlassmorphicContainer extends StatelessWidget {
       // 与底部按钮一致：降低底色透明度
       backgroundColor: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.03),
       borderRadius: borderRadius,
-      // 搜索框边框稍细一些，更精致
-      //borderWidth: 0.1,
+      //搜索框边框稍细一些，更精致
+      borderWidth: 0.0,
       // 与底部按钮一致：高亮度边框
-      borderColor: Colors.white.withValues(alpha: 0.3),
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,

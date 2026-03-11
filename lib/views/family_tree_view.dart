@@ -1117,7 +1117,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
             offset: const Offset(0, 15),
           ),
           BoxShadow(
-            color: Colors.white.withValues(alpha: 0.15),
+            color: Colors.white.withValues(alpha: 0.25),
             blurRadius: 15,
             spreadRadius: -2,
             offset: const Offset(0, -1),
@@ -1165,7 +1165,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('家族数据已加密复制。请妥善保存此字符串，它是您“回魂”的唯一凭证。')),
+      const SnackBar(content: Text('家族数据已复制。请妥善保存此字符串。')),
     );
   }
 
