@@ -25,10 +25,10 @@ bool _personMatchesQuery(Person p, String query) {
 // ─────────────────────────────────────────────
 class _NodePosition {
   final Person person;
-  final Offset center;   // absolute canvas position
-  final double radius;   // avatar circle radius
-  final int steps;       // blood-distance from root
-  final int generation;  // signed generation (negative = ancestor)
+  final Offset center; // absolute canvas position
+  final double radius; // avatar circle radius
+  final int steps; // blood-distance from root
+  final int generation; // signed generation (negative = ancestor)
 
   const _NodePosition({
     required this.person,
@@ -43,13 +43,12 @@ class _NodePosition {
 // Galaxy Layout Engine  (v5 – 水波纹三层扩散)
 // ─────────────────────────────────────────────
 class GalaxyLayoutEngine {
-
   // Generation color
   static Color generationColor(int generation) {
     if (generation < -1) return const Color(0xFF2196F3); // 祖辈 - 蓝
     if (generation == -1) return const Color(0xFFFFC107); // 父辈 - 黄
-    if (generation == 0) return const Color(0xFF4CAF50);  // 平辈 - 绿
-    return const Color(0xFFFF5722);                        // 子辈 - 橙
+    if (generation == 0) return const Color(0xFF4CAF50); // 平辈 - 绿
+    return const Color(0xFFFF5722); // 子辈 - 橙
   }
 
   /// Build tiered ripple layout.
@@ -75,13 +74,17 @@ class GalaxyLayoutEngine {
     );
 
     // 转换为 _NodePosition 格式
-    return layoutData.map((data) => _NodePosition(
-      person: data.person,
-      center: data.center,
-      radius: data.radius,
-      steps: data.tier,
-      generation: data.generation,
-    )).toList();
+    return layoutData
+        .map(
+          (data) => _NodePosition(
+            person: data.person,
+            center: data.center,
+            radius: data.radius,
+            steps: data.tier,
+            generation: data.generation,
+          ),
+        )
+        .toList();
   }
 }
 
@@ -112,12 +115,10 @@ class GalaxyPainter extends CustomPainter {
   });
 
   // 快速查找: id -> Person
-  Map<String, Person> get _personById => {
-    for (final p in people) p.id: p,
-  };
+  Map<String, Person> get _personById => {for (final p in people) p.id: p};
 
   // ========== 关系计算 (与详细信息面板完全对齐) ==========
-  
+
   // 获取配偶ID集合 (使用详细信息面板相同的算法)
   Set<String> _getSpouseIds(Person p) {
     final spouses = <String>{};
@@ -189,7 +190,7 @@ class GalaxyPainter extends CustomPainter {
   Set<String> _getSiblingIds(Person p) {
     final siblingIds = <String>{};
     if (p.parents.isEmpty) return siblingIds;
-    
+
     for (final parentId in p.parents) {
       final parent = _personById[parentId];
       if (parent != null) {
@@ -207,24 +208,24 @@ class GalaxyPainter extends CustomPainter {
   // key: personId, value: 需要与之连线的节点ID集合
   Map<String, Set<String>> _buildConnectionMap() {
     final map = <String, Set<String>>{};
-    
+
     for (final person in people) {
       final connections = <String>{};
-      
+
       // 1. 父母连线
       connections.addAll(_getParentIds(person));
-      
+
       // 2. 子女连线
       connections.addAll(_getChildrenIds(person));
-      
+
       // 3. 配偶连线
       connections.addAll(_getSpouseIds(person));
-      
+
       if (connections.isNotEmpty) {
         map[person.id] = connections;
       }
     }
-    
+
     return map;
   }
 
@@ -234,7 +235,7 @@ class GalaxyPainter extends CustomPainter {
     final related = <String>{};
     final person = _personById[personId];
     if (person == null) return related;
-    
+
     // 父母
     related.addAll(_getParentIds(person));
     // 子女
@@ -243,7 +244,7 @@ class GalaxyPainter extends CustomPainter {
     related.addAll(_getSpouseIds(person));
     // 兄弟姐妹 (高亮但不连线)
     related.addAll(_getSiblingIds(person));
-    
+
     return related;
   }
 
@@ -252,24 +253,22 @@ class GalaxyPainter extends CustomPainter {
     final related = <String>{};
     final person = _personById[personId];
     if (person == null) return related;
-    
+
     // 父母
     related.addAll(_getParentIds(person));
     // 子女
     related.addAll(_getChildrenIds(person));
     // 配偶
     related.addAll(_getSpouseIds(person));
-    
+
     return related;
   }
-
-
 
   // 检查 targetId 是否与选中的人有关联 (用于节点高亮)
   bool _isRelated(String targetId) {
     if (selectedId == null) return false;
     if (targetId == selectedId) return true;
-    
+
     final related = _buildRelatedSet(selectedId!);
     return related.contains(targetId);
   }
@@ -297,7 +296,7 @@ class GalaxyPainter extends CustomPainter {
     if (highlightedIds.isNotEmpty) {
       _drawHighlightRings(canvas);
     }
-    
+
     // Layer 6 – 选中节点的高亮光环 (带呼吸效果)
     if (selectedId != null) {
       _drawSelectedNodeRing(canvas);
@@ -320,7 +319,11 @@ class GalaxyPainter extends CustomPainter {
   }
 
   // ── Orbit rings (compact) ───────────────────
-  void _drawOrbitRings(Canvas canvas, Offset center, {required bool inFocusMode}) {
+  void _drawOrbitRings(
+    Canvas canvas,
+    Offset center, {
+    required bool inFocusMode,
+  }) {
     final alpha = inFocusMode ? 0.015 : 0.04;
     final paint = Paint()
       ..color = Colors.white.withValues(alpha: alpha)
@@ -339,18 +342,18 @@ class GalaxyPainter extends CustomPainter {
   void _drawKinshipLines(Canvas canvas) {
     // Build fast id → center lookup
     final Map<String, Offset> centerOf = {
-      for (final n in nodes) n.person.id: n.center
+      for (final n in nodes) n.person.id: n.center,
     };
 
     // Track drawn pairs to avoid duplicates
     final Set<String> drawn = {};
-    
+
     // 预计算连线关系
     final connectionMap = _buildConnectionMap();
-    
+
     // 预计算直接关联节点
-    final directConnections = selectedId != null 
-        ? _buildDirectConnectionSet(selectedId!) 
+    final directConnections = selectedId != null
+        ? _buildDirectConnectionSet(selectedId!)
         : <String>{};
 
     for (final person in people) {
@@ -363,16 +366,24 @@ class GalaxyPainter extends CustomPainter {
       for (final targetId in connections) {
         final toPos = centerOf[targetId];
         if (toPos == null) continue;
-        
+
         final key = _edgeKey(person.id, targetId);
         if (drawn.add(key)) {
           // 高亮条件: 选中的人是连线的一端
-          final isHighlighted = selectedId != null && 
+          final isHighlighted =
+              selectedId != null &&
               (person.id == selectedId || targetId == selectedId);
-          
+
           if (isHighlighted) {
             // 流光渐变连线
-            _drawFlowLine(canvas, fromPos, toPos, person.id, targetId, directConnections);
+            _drawFlowLine(
+              canvas,
+              fromPos,
+              toPos,
+              person.id,
+              targetId,
+              directConnections,
+            );
           } else {
             // 普通连线
             final linePaint = Paint()
@@ -387,25 +398,36 @@ class GalaxyPainter extends CustomPainter {
   }
 
   // 绘制流光渐变连线
-  void _drawFlowLine(Canvas canvas, Offset from, Offset to, String fromId, String toId, Set<String> directConnections) {
+  void _drawFlowLine(
+    Canvas canvas,
+    Offset from,
+    Offset to,
+    String fromId,
+    String toId,
+    Set<String> directConnections,
+  ) {
     // 确定流光方向: 从选中节点流向关联节点
     final bool isFromSelected = fromId == selectedId;
     final start = isFromSelected ? from : to;
     final end = isFromSelected ? to : from;
-    
+
     // 获取目标节点的辈分颜色 (从 nodes 中查找)
     final targetNode = nodes.firstWhere(
       (n) => n.person.id == (isFromSelected ? toId : fromId),
-      orElse: () => nodes.isNotEmpty ? nodes.first : _NodePosition(
-        person: _personById.values.first,
-        center: Offset.zero,
-        radius: 30,
-        steps: 0,
-        generation: 0,
-      ),
+      orElse: () => nodes.isNotEmpty
+          ? nodes.first
+          : _NodePosition(
+              person: _personById.values.first,
+              center: Offset.zero,
+              radius: 30,
+              steps: 0,
+              generation: 0,
+            ),
     );
-    final generationColor = GalaxyLayoutEngine.generationColor(targetNode.generation);
-    
+    final generationColor = GalaxyLayoutEngine.generationColor(
+      targetNode.generation,
+    );
+
     // 创建流光渐变
     final gradient = LinearGradient(
       begin: Alignment.centerLeft,
@@ -415,34 +437,28 @@ class GalaxyPainter extends CustomPainter {
         generationColor.withValues(alpha: 0.8),
         Colors.white.withValues(alpha: 0.6),
       ],
-      stops: [
-        0.0,
-        0.5 + 0.5 * math.sin(flowPhase * 2 * math.pi),
-        1.0,
-      ],
+      stops: [0.0, 0.5 + 0.5 * math.sin(flowPhase * 2 * math.pi), 1.0],
     );
 
     // 绘制流光效果
     final flowPaint = Paint()
-      ..shader = gradient.createShader(
-        Rect.fromPoints(start, end).inflate(2),
-      )
+      ..shader = gradient.createShader(Rect.fromPoints(start, end).inflate(2))
       ..strokeWidth = 2.5
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
     // 主连线
     canvas.drawLine(start, end, flowPaint);
-    
+
     // 流光点效果
     final flowOffset = (math.sin(flowPhase * 2 * math.pi) + 1) / 2; // 0.0 ~ 1.0
     final flowPoint = Offset.lerp(start, end, flowOffset)!;
-    
+
     final glowPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.8)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
     canvas.drawCircle(flowPoint, 3, glowPaint);
-    
+
     final corePaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.fill;
@@ -461,8 +477,9 @@ class GalaxyPainter extends CustomPainter {
 
     for (final node in nodes) {
       if (!highlightedIds.contains(node.person.id)) continue;
-      final color = GalaxyLayoutEngine.generationColor(node.generation)
-          .withValues(alpha: ringAlpha);
+      final color = GalaxyLayoutEngine.generationColor(
+        node.generation,
+      ).withValues(alpha: ringAlpha);
       ringPaint.color = color;
       canvas.drawCircle(node.center, node.radius + ringExpand, ringPaint);
       final glowPaint = Paint()
@@ -476,16 +493,16 @@ class GalaxyPainter extends CustomPainter {
   void _drawSelectedNodeRing(Canvas canvas) {
     for (final node in nodes) {
       if (node.person.id != selectedId) continue;
-      
+
       // 绘制高亮光环
       final ringPaint = Paint()
         ..color = Colors.white.withValues(alpha: 0.9)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3.0;
-      
+
       // 外环
       canvas.drawCircle(node.center, node.radius + 6, ringPaint);
-      
+
       // 发光效果
       final glowPaint = Paint()
         ..color = Colors.white.withValues(alpha: 0.4)
@@ -498,25 +515,30 @@ class GalaxyPainter extends CustomPainter {
       a.compareTo(b) < 0 ? '$a|$b' : '$b|$a';
 
   // ── 虚线圆环 (用于兄弟姐妹标识) ───────────────
-  void _drawDashedRing(Canvas canvas, Offset center, double radius, Color color) {
+  void _drawDashedRing(
+    Canvas canvas,
+    Offset center,
+    double radius,
+    Color color,
+  ) {
     const dashLength = 4.0;
     const gapLength = 3.0;
     const strokeWidth = 1.5;
-    
+
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth;
-    
+
     // 计算圆周长
     final circumference = 2 * math.pi * radius;
     final totalDashCount = (circumference / (dashLength + gapLength)).floor();
-    
+
     // 绘制虚线
     for (int i = 0; i < totalDashCount; i++) {
       final startAngle = (i * (dashLength + gapLength)) / radius;
       final sweepAngle = dashLength / radius;
-      
+
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: radius),
         startAngle,
@@ -534,7 +556,8 @@ class GalaxyPainter extends CustomPainter {
     // 使用双向指针判定关联关系 (直接关联 + 兄弟姐妹)
     final isRelated = _isRelated(node.person.id);
     // 区分直接关联和兄弟姐妹
-    final isDirectConnection = selectedId != null && 
+    final isDirectConnection =
+        selectedId != null &&
         _buildDirectConnectionSet(selectedId!).contains(node.person.id);
     final isSibling = isRelated && !isDirectConnection && !isSelected;
     final color = GalaxyLayoutEngine.generationColor(node.generation);
@@ -568,7 +591,7 @@ class GalaxyPainter extends CustomPainter {
 
     // Border ring
     final borderPaint = Paint()
-      ..color = isSelected 
+      ..color = isSelected
           ? Colors.white.withValues(alpha: opacity)
           : color.withValues(alpha: opacity)
       ..style = PaintingStyle.stroke
@@ -618,10 +641,7 @@ class GalaxyPainter extends CustomPainter {
     final totalH = relPainter.height + 2 + namePainter.height;
     final topY = center.dy - totalH / 2;
 
-    relPainter.paint(
-      canvas,
-      Offset(center.dx - relPainter.width / 2, topY),
-    );
+    relPainter.paint(canvas, Offset(center.dx - relPainter.width / 2, topY));
     namePainter.paint(
       canvas,
       Offset(center.dx - namePainter.width / 2, topY + relPainter.height + 2),
@@ -663,17 +683,17 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
 
   // 呼吸灯动画
   late final AnimationController _breathCtrl;
-  
+
   // 流光动画控制器
   late final AnimationController _flowCtrl;
-  
+
   // 选中节点呼吸动画
   late final AnimationController _selectedBreathCtrl;
-  
+
   // 焦点模式: 选中节点的缩放动画
   late final AnimationController _scaleCtrl;
   String? _focusedId; // 当前焦点节点ID
-  
+
   // 详细信息侧边栏显示控制
   bool _showDetailSidebar = false;
 
@@ -687,19 +707,19 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat();
-    
+
     // 流光动画控制器 (2秒循环)
     _flowCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat();
-    
+
     // 选中节点呼吸动画 (3秒循环)
     _selectedBreathCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3000),
     )..repeat();
-    
+
     // 缩放动画控制器
     _scaleCtrl = AnimationController(
       vsync: this,
@@ -716,7 +736,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     _scaleCtrl.dispose();
     super.dispose();
   }
-  
+
   void _showAIAssistant() {
     showModalBottomSheet(
       context: context,
@@ -749,8 +769,8 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
   String? _hitTest(Offset localPos, List<_NodePosition> nodes) {
     for (final node in nodes.reversed) {
       // 考虑缩放后的半径进行命中测试
-      final effectiveRadius = node.person.id == _focusedId 
-          ? node.radius * 1.2 
+      final effectiveRadius = node.person.id == _focusedId
+          ? node.radius * 1.2
           : node.radius;
       if ((localPos - node.center).distance <= effectiveRadius) {
         return node.person.id;
@@ -758,14 +778,14 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     }
     return null;
   }
-  
+
   // 显示详细信息侧边栏
   void _showPersonDetail() {
     setState(() {
       _showDetailSidebar = true;
     });
   }
-  
+
   // 关闭详细信息侧边栏
   void _closeDetailSidebar() {
     setState(() {
@@ -792,8 +812,9 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
         builder: (context, child) {
           final centerPerson = widget.controller.centerPerson;
           final selectedId = widget.controller.selectedPerson?.id;
-          final latestSelectedPerson =
-              selectedId != null ? widget.controller.getPerson(selectedId) : null;
+          final latestSelectedPerson = selectedId != null
+              ? widget.controller.getPerson(selectedId)
+              : null;
 
           if (centerPerson == null) {
             return const Center(child: Text('暂无数据'));
@@ -805,7 +826,10 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                 math.max(constraints.maxWidth, 1000),
                 math.max(constraints.maxHeight, 1000),
               );
-              final canvasCenter = Offset(canvasSize.width / 2, canvasSize.height / 2);
+              final canvasCenter = Offset(
+                canvasSize.width / 2,
+                canvasSize.height / 2,
+              );
 
               final generationMap = widget.controller.calculateGenerations();
               final nodes = GalaxyLayoutEngine.compute(
@@ -815,18 +839,18 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                 generationMap: generationMap,
                 seed: _layoutSeed,
               );
-              
+
               // 搜索高亮: 匹配到的节点 ID
               final highlightedIds = _searchQuery.isEmpty
                   ? <String>{}
                   : widget.controller.allPeople
-                      .where((p) => _personMatchesQuery(p, _searchQuery))
-                      .map((p) => p.id)
-                      .toSet();
-              
+                        .where((p) => _personMatchesQuery(p, _searchQuery))
+                        .map((p) => p.id)
+                        .toSet();
+
               // 注意: 现在 GalaxyPainter 内部通过双向指针判定关联关系
               // 不再需要外部传入 relatedIds 和 spouseMap
-              
+
               // 应用缩放动画到节点
               final animatedNodes = nodes.map((node) {
                 if (node.person.id == _focusedId) {
@@ -841,7 +865,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                 }
                 return node;
               }).toList();
-              
+
               return Stack(
                 children: [
                   // 1. Galaxy canvas (interactive)
@@ -875,7 +899,12 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                           }
                         },
                         child: AnimatedBuilder(
-                          animation: Listenable.merge([_breathCtrl, _scaleCtrl, _flowCtrl, _selectedBreathCtrl]),
+                          animation: Listenable.merge([
+                            _breathCtrl,
+                            _scaleCtrl,
+                            _flowCtrl,
+                            _selectedBreathCtrl,
+                          ]),
                           builder: (context, _) => CustomPaint(
                             size: canvasSize,
                             painter: GalaxyPainter(
@@ -892,7 +921,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       ),
                     ),
                   ),
-              
+
                   // 2. 搜索框 (顶部中间, Apple级毛玻璃)
                   Positioned(
                     top: 16,
@@ -901,7 +930,10 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                     child: SearchGlassmorphicContainer(
                       child: TextField(
                         controller: _searchCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
                         decoration: InputDecoration(
                           hintText: '搜索姓名或关系…',
                           hintStyle: TextStyle(
@@ -933,11 +965,11 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       ),
                     ),
                   ),
-              
+
                   // 3. 底部浮动毛玻璃按钮 (仅在选中节点时显示) - 紧凑居中
                   if (_focusedId != null && !_showDetailSidebar)
                     Positioned(
-                      bottom: 40,
+                      bottom: 104,
                       left: 0,
                       right: 0,
                       child: UnconstrainedBox(
@@ -946,7 +978,9 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                           onTap: _showPersonDetail,
                           child: ButtonGlassmorphicContainer(
                             onTap: _showPersonDetail,
-                            borderRadius: const BorderRadius.all(Radius.circular(20)),
+                            borderRadius: const BorderRadius.all(
+                              Radius.circular(20),
+                            ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 20,
@@ -958,7 +992,9 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                                   Text(
                                     '显示详细信息',
                                     style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.95),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.95,
+                                      ),
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
                                       letterSpacing: 0.3,
@@ -977,8 +1013,33 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                         ),
                       ),
                     ),
-                  
-                  // 4. Detail sidebar (仅点击按钮后显示)
+
+                  // 4. 底部备份按钮组（毛玻璃）
+                  Positioned(
+                    bottom: 28,
+                    left: 16,
+                    right: 16,
+                    child: SafeArea(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildBackupActionButton(
+                            icon: Icons.ios_share_rounded,
+                            label: '导出备份',
+                            onTap: _exportFamilyData,
+                          ),
+                          const SizedBox(width: 12),
+                          _buildBackupActionButton(
+                            icon: Icons.download_rounded,
+                            label: '导入恢复',
+                            onTap: _showImportDialog,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // 5. Detail sidebar (仅点击按钮后显示)
                   if (_showDetailSidebar && latestSelectedPerson != null)
                     Positioned(
                       right: 0,
@@ -988,12 +1049,18 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                         person: latestSelectedPerson,
                         controller: widget.controller,
                         onClose: _closeDetailSidebar,
-                        onAddParent: () =>
-                            _showAddParentDialog(context, latestSelectedPerson.id),
-                        onAddChild: () =>
-                            _showAddChildDialog(context, latestSelectedPerson.id),
-                        onEdit: () =>
-                            _showEditPersonDialog(context, latestSelectedPerson),
+                        onAddParent: () => _showAddParentDialog(
+                          context,
+                          latestSelectedPerson.id,
+                        ),
+                        onAddChild: () => _showAddChildDialog(
+                          context,
+                          latestSelectedPerson.id,
+                        ),
+                        onEdit: () => _showEditPersonDialog(
+                          context,
+                          latestSelectedPerson,
+                        ),
                         onDelete: () => _showDeleteConfirmation(
                           context,
                           latestSelectedPerson.id,
@@ -1009,13 +1076,156 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
       // 可爱的语音助手浮动按钮 - 放在右侧避免与底部毛玻璃按钮重叠
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(right: 8, bottom: 100),
-        child: FloatingAIAssistant(
-          onTap: _showAIAssistant,
-          isRightSide: true,
-        ),
+        child: FloatingAIAssistant(onTap: _showAIAssistant, isRightSide: true),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
+  }
+
+  Widget _buildBackupActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return SizedBox(
+      height: 48,
+      child: ButtonGlassmorphicContainer(
+        onTap: onTap,
+        borderRadius: const BorderRadius.all(Radius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white.withValues(alpha: 0.92), size: 16),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.94),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportFamilyData() async {
+    final backupString = widget.controller.exportToJSON();
+    await Clipboard.setData(ClipboardData(text: backupString));
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('家族数据已加密复制。请妥善保存此字符串，它是您“回魂”的唯一凭证。')),
+    );
+  }
+
+  Future<void> _showImportDialog() async {
+    final inputController = TextEditingController();
+
+    final jsonString = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surfaceGrey,
+        title: const Text('导入家族数据', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: inputController,
+          maxLines: 8,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: '请粘贴导出的 JSON 字符串',
+            hintStyle: const TextStyle(color: Colors.white54),
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.06),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.2),
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.2),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.45),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, inputController.text.trim()),
+            child: const Text('确定', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    inputController.dispose();
+
+    if (jsonString == null || jsonString.isEmpty) {
+      return;
+    }
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surfaceGrey,
+        title: const Text('二次确认', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          '警告：导入操作将覆盖当前所有录入数据，是否继续？',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              '继续导入',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      await widget.controller.importFromJSON(jsonString);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('导入成功，数据已覆盖并落盘。')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('导入失败：数据格式无效，请检查备份字符串。'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
   void _showAddParentDialog(BuildContext context, String childId) {

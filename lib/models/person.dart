@@ -12,11 +12,12 @@ class GiftRecord {
   });
 
   factory GiftRecord.fromMap(Map<String, dynamic> map) {
+    final amountValue = map['amount'];
     return GiftRecord(
       id: map['id']?.toString() ?? '',
-      amount: (map['amount'] is int) 
-          ? (map['amount'] as int).toDouble() 
-          : (map['amount'] as double? ?? 0.0),
+      amount: amountValue is num
+          ? amountValue.toDouble()
+          : double.tryParse(amountValue?.toString() ?? '') ?? 0.0,
       event: map['event']?.toString() ?? '',
       date: DateTime.tryParse(map['date']?.toString() ?? '') ?? DateTime.now(),
     );
@@ -57,19 +58,32 @@ class Person {
 
   // 必须叫这个名字，且必须是 factory
   factory Person.fromMap(Map<String, dynamic> map) {
+    final rawParents = map['parents'];
+    final rawChildren = map['children'];
+    final rawGiftHistory = map['giftHistory'];
+    final spouseRaw = map['spouse'];
+
     return Person(
       id: map['id']?.toString() ?? '',
       name: map['name']?.toString() ?? '',
       relationship: map['relationship']?.toString() ?? '',
       gender: map['gender']?.toString() ?? '男',
       bio: map['bio']?.toString() ?? '',
-      parents: List<String>.from(map['parents'] ?? []),
-      children: List<String>.from(map['children'] ?? []),
-      spouse: map['spouse']?.toString(),
-      giftHistory: (map['giftHistory'] as List<dynamic>?)
-              ?.map((e) => GiftRecord.fromMap(e as Map<String, dynamic>))
-              .toList() ??
-          [],
+      parents: rawParents is List
+          ? rawParents.map((e) => e.toString()).toList()
+          : const [],
+      children: rawChildren is List
+          ? rawChildren.map((e) => e.toString()).toList()
+          : const [],
+      spouse: spouseRaw == null || spouseRaw.toString().isEmpty
+          ? null
+          : spouseRaw.toString(),
+      giftHistory: rawGiftHistory is List
+          ? rawGiftHistory
+                .whereType<Map>()
+                .map((e) => GiftRecord.fromMap(Map<String, dynamic>.from(e)))
+                .toList()
+          : const [],
     );
   }
 
