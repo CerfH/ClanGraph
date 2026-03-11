@@ -1016,9 +1016,9 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
 
                   // 4. 底部备份按钮组（毛玻璃）
                   Positioned(
-                    bottom: 28,
-                    left: 16,
-                    right: 16,
+                    top: 80,
+                    left: 0,
+                    right: 0,
                     child: SafeArea(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1087,28 +1087,72 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     required String label,
     required VoidCallback onTap,
   }) {
-    return SizedBox(
-      height: 48,
-      child: ButtonGlassmorphicContainer(
-        onTap: onTap,
-        borderRadius: const BorderRadius.all(Radius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: Colors.white.withValues(alpha: 0.92), size: 16),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.94),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.2,
-                ),
+    final borderRadius = BorderRadius.circular(18);
+
+    return SpringButton(
+      hapticType: HapticFeedbackType.medium,
+      onTap: onTap,
+      // 这里的参数完全对齐你的 SearchGlassmorphicContainer，保证顶级质感
+      child: GlassmorphicContainer(
+        blurSigma: 25.0,
+        backgroundColor: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.03),
+        borderRadius: borderRadius,
+        borderWidth: 0.5, // 细边框，精致不突兀
+        borderColor: Colors.white.withValues(alpha: 0.3),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.20),
+            Colors.white.withValues(alpha: 0.10),
+            Colors.black.withValues(alpha: 0.05),
+          ],
+          stops: const [0.0, 0.15, 1.0],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.4),
+            blurRadius: 40,
+            spreadRadius: -8,
+            offset: const Offset(0, 15),
+          ),
+          BoxShadow(
+            color: Colors.white.withValues(alpha: 0.15),
+            blurRadius: 15,
+            spreadRadius: -2,
+            offset: const Offset(0, -1),
+          ),
+        ],
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: borderRadius,
+            splashColor: Colors.white.withValues(alpha: 0.15),
+            highlightColor: Colors.white.withValues(alpha: 0.08),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon, 
+                    color: Colors.white.withValues(alpha: 0.85), 
+                    size: 14,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
