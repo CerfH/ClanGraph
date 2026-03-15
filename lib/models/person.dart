@@ -41,7 +41,8 @@ class Person {
   final String bio;
   final List<String> parents;
   final List<String> children;
-  final String? spouse;
+  final String? spouse; // 保留，向后兼容
+  final String? spouseId; // 新增，显式配偶 ID
   final List<GiftRecord> giftHistory;
 
   Person({
@@ -53,6 +54,7 @@ class Person {
     this.parents = const [],
     this.children = const [],
     this.spouse,
+    this.spouseId,
     this.giftHistory = const [],
   });
 
@@ -62,6 +64,7 @@ class Person {
     final rawChildren = map['children'];
     final rawGiftHistory = map['giftHistory'];
     final spouseRaw = map['spouse'];
+    final spouseIdRaw = map['spouseId'];
 
     return Person(
       id: map['id']?.toString() ?? '',
@@ -78,6 +81,9 @@ class Person {
       spouse: spouseRaw == null || spouseRaw.toString().isEmpty
           ? null
           : spouseRaw.toString(),
+      spouseId: spouseIdRaw == null || spouseIdRaw.toString().isEmpty
+          ? null
+          : spouseIdRaw.toString(),
       giftHistory: rawGiftHistory is List
           ? rawGiftHistory
                 .whereType<Map>()
@@ -98,6 +104,7 @@ class Person {
       'parents': parents,
       'children': children,
       'spouse': spouse,
+      'spouseId': spouseId,
       'giftHistory': giftHistory.map((e) => e.toMap()).toList(),
     };
   }

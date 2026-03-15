@@ -9,6 +9,7 @@ import '../widgets/person_dialog.dart';
 import '../widgets/spring_button.dart';
 import '../widgets/glassmorphic_container.dart';
 import '../widgets/floating_ai_assistant.dart';
+import '../widgets/export_dialog.dart';
 import '../theme/app_theme.dart';
 import 'ai_assistant_view.dart';
 
@@ -1026,7 +1027,11 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                           _buildBackupActionButton(
                             icon: Icons.ios_share_rounded,
                             label: '导出备份',
-                            onTap: _exportFamilyData,
+                            onTap: () => showDialog(
+                              context: context,
+                              builder: (ctx) =>
+                                  ExportDialog(controller: widget.controller),
+                            ),
                           ),
                           const SizedBox(width: 12),
                           _buildBackupActionButton(
@@ -1054,6 +1059,10 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                           latestSelectedPerson.id,
                         ),
                         onAddChild: () => _showAddChildDialog(
+                          context,
+                          latestSelectedPerson.id,
+                        ),
+                        onAddSpouse: () => _showAddSpouseDialog(
                           context,
                           latestSelectedPerson.id,
                         ),
@@ -1095,7 +1104,12 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
       // 这里的参数完全对齐你的 SearchGlassmorphicContainer，保证顶级质感
       child: GlassmorphicContainer(
         blurSigma: 25.0,
-        backgroundColor: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.03),
+        backgroundColor: const Color.fromARGB(
+          255,
+          255,
+          255,
+          255,
+        ).withValues(alpha: 0.03),
         borderRadius: borderRadius,
         borderWidth: 0.5, // 细边框，精致不突兀
         borderColor: Colors.white.withValues(alpha: 0.3),
@@ -1136,8 +1150,8 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    icon, 
-                    color: Colors.white.withValues(alpha: 0.85), 
+                    icon,
+                    color: Colors.white.withValues(alpha: 0.85),
                     size: 14,
                   ),
                   const SizedBox(width: 4),
@@ -1156,16 +1170,6 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
           ),
         ),
       ),
-    );
-  }
-
-  Future<void> _exportFamilyData() async {
-    final backupString = widget.controller.exportToJSON();
-    await Clipboard.setData(ClipboardData(text: backupString));
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('家族数据已复制。请妥善保存此字符串。')),
     );
   }
 
@@ -1291,6 +1295,24 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
         title: '添加子女',
         onSubmit: (name, relationship, bio, gender) {
           widget.controller.addChild(parentId, name, relationship, bio, gender);
+        },
+      ),
+    );
+  }
+
+  void _showAddSpouseDialog(BuildContext context, String personId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => PersonDialog(
+        title: '添加配偶',
+        onSubmit: (name, relationship, bio, gender) {
+          widget.controller.addSpouse(
+            personId,
+            name,
+            relationship,
+            bio,
+            gender,
+          );
         },
       ),
     );

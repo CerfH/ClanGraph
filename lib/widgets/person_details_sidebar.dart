@@ -11,6 +11,7 @@ class PersonDetailsSidebar extends StatelessWidget {
   final VoidCallback onClose;
   final VoidCallback onAddParent;
   final VoidCallback onAddChild;
+  final VoidCallback onAddSpouse;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -21,6 +22,7 @@ class PersonDetailsSidebar extends StatelessWidget {
     required this.onClose,
     required this.onAddParent,
     required this.onAddChild,
+    required this.onAddSpouse,
     required this.onEdit,
     required this.onDelete,
   });
@@ -222,6 +224,12 @@ class PersonDetailsSidebar extends StatelessWidget {
                     ),
                     _buildActionButton(
                       context,
+                      icon: Icons.favorite,
+                      label: '添加配偶',
+                      onTap: () => _onAddSpouseTap(context),
+                    ),
+                    _buildActionButton(
+                      context,
                       icon: Icons.edit,
                       label: '编辑信息',
                       onTap: onEdit,
@@ -264,7 +272,8 @@ class PersonDetailsSidebar extends StatelessWidget {
     }
 
     // 按日期倒序排序并取前3条
-    final sortedHistory = List.of(p.giftHistory)..sort((a, b) => b.date.compareTo(a.date));
+    final sortedHistory = List.of(p.giftHistory)
+      ..sort((a, b) => b.date.compareTo(a.date));
     final latestRecords = sortedHistory.take(3).toList();
 
     return Container(
@@ -279,15 +288,21 @@ class PersonDetailsSidebar extends StatelessWidget {
         children: latestRecords.asMap().entries.map((entry) {
           final record = entry.value;
           final isLast = entry.key == latestRecords.length - 1;
-          
-          final dateStr = "${record.date.year}-${record.date.month.toString().padLeft(2, '0')}-${record.date.day.toString().padLeft(2, '0')}";
+
+          final dateStr =
+              "${record.date.year}-${record.date.month.toString().padLeft(2, '0')}-${record.date.day.toString().padLeft(2, '0')}";
 
           return Container(
-            decoration: isLast ? null : BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.white10)),
-            ),
+            decoration: isLast
+                ? null
+                : BoxDecoration(
+                    border: Border(bottom: BorderSide(color: Colors.white10)),
+                  ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12.0,
+                vertical: 8.0,
+              ),
               child: Row(
                 children: [
                   Expanded(
@@ -305,7 +320,10 @@ class PersonDetailsSidebar extends StatelessWidget {
                           ),
                           TextSpan(
                             text: '￥${record.amount.toStringAsFixed(0)}',
-                            style: const TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                              color: AppTheme.electricBlue,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ],
                       ),
@@ -313,7 +331,11 @@ class PersonDetailsSidebar extends StatelessWidget {
                   ),
                   // Edit Button
                   IconButton(
-                    icon: const Icon(Icons.edit, size: 16, color: Colors.white38),
+                    icon: const Icon(
+                      Icons.edit,
+                      size: 16,
+                      color: Colors.white38,
+                    ),
                     constraints: const BoxConstraints(),
                     padding: const EdgeInsets.all(4),
                     onPressed: () {
@@ -330,7 +352,11 @@ class PersonDetailsSidebar extends StatelessWidget {
                   const SizedBox(width: 4),
                   // Delete Button
                   IconButton(
-                    icon: const Icon(Icons.delete, size: 16, color: Colors.redAccent),
+                    icon: const Icon(
+                      Icons.delete,
+                      size: 16,
+                      color: Colors.redAccent,
+                    ),
                     constraints: const BoxConstraints(),
                     padding: const EdgeInsets.all(4),
                     onPressed: () {
@@ -346,13 +372,54 @@ class PersonDetailsSidebar extends StatelessWidget {
     );
   }
 
-  void _showDeleteGiftConfirmDialog(BuildContext context, String personId, String recordId) {
+  void _onAddSpouseTap(BuildContext context) {
+    if (person!.spouseId != null && person!.spouseId!.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.surfaceGrey,
+          title: const Text('已有配偶', style: TextStyle(color: Colors.white)),
+          content: const Text(
+            '该成员已有配偶关系，是否替换？',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消', style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                onAddSpouse();
+              },
+              child: const Text(
+                '替换',
+                style: TextStyle(color: AppTheme.electricBlue),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      onAddSpouse();
+    }
+  }
+
+  void _showDeleteGiftConfirmDialog(
+    BuildContext context,
+    String personId,
+    String recordId,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surfaceGrey,
         title: const Text('确认删除', style: TextStyle(color: Colors.white)),
-        content: const Text('确定要删除这条礼金记录吗？', style: TextStyle(color: Colors.white70)),
+        content: const Text(
+          '确定要删除这条礼金记录吗？',
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -491,13 +558,13 @@ class PersonDetailsSidebar extends StatelessWidget {
         parentNames.add(parent.name);
         // 关键：顺便把父母的配偶也算进来（解决舅舅只有外婆没有外公的问题）
         for (var spouseChildId in parent.children) {
-           final spouseChild = c.getPerson(spouseChildId);
-           if (spouseChild != null) {
-             for (var otherParentId in spouseChild.parents) {
-               final otherParent = c.getPerson(otherParentId);
-               if (otherParent != null) parentNames.add(otherParent.name);
-             }
-           }
+          final spouseChild = c.getPerson(spouseChildId);
+          if (spouseChild != null) {
+            for (var otherParentId in spouseChild.parents) {
+              final otherParent = c.getPerson(otherParentId);
+              if (otherParent != null) parentNames.add(otherParent.name);
+            }
+          }
         }
       }
     }
@@ -534,7 +601,7 @@ class PersonDetailsSidebar extends StatelessWidget {
   // 2. 动态找兄弟姐妹：寻找拥有至少一个共同父母的人
   String _getSiblingNames(Person p, FamilyController c) {
     if (p.parents.isEmpty) return '暂无';
-    
+
     final Set<String> siblingNames = {};
     for (var parentId in p.parents) {
       final parent = c.getPerson(parentId);
