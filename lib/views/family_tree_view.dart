@@ -46,10 +46,11 @@ class _NodePosition {
 class GalaxyLayoutEngine {
   // Generation color
   static Color generationColor(int generation) {
-    if (generation < -1) return const Color(0xFF2196F3); // 祖辈 - 蓝
-    if (generation == -1) return const Color(0xFFFFC107); // 父辈 - 黄
-    if (generation == 0) return const Color(0xFF4CAF50); // 平辈 - 绿
-    return const Color(0xFFFF5722); // 子辈 - 橙
+    if (generation <= -2) return AppTheme.genAncestor2; // 曾祖辈 - 紫
+    if (generation == -1) return AppTheme.genAncestor1; // 祖辈 - 蓝
+    if (generation == 0) return AppTheme.genSelf; // 本辈 - 绿
+    if (generation == 1) return AppTheme.genChild1; // 子辈 - 黄
+    return AppTheme.genChild2; // 孙辈 - 橙
   }
 
   /// Build tiered ripple layout.
@@ -835,7 +836,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
               final generationMap = widget.controller.calculateGenerations();
               final nodes = GalaxyLayoutEngine.compute(
                 allPeople: widget.controller.allPeople,
-                rootId: 'root',
+                rootId: widget.controller.mainPersonId,
                 canvasCenter: canvasCenter,
                 generationMap: generationMap,
                 seed: _layoutSeed,
@@ -1074,6 +1075,16 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                           context,
                           latestSelectedPerson.id,
                         ),
+                        onSetAsCenter: () {
+                          widget.controller.setMainPerson(
+                            latestSelectedPerson.id,
+                          );
+                          widget.controller.clearSelection();
+                          setState(() {
+                            _showDetailSidebar = false;
+                            _focusedId = null;
+                          });
+                        },
                       ),
                     ),
                 ],

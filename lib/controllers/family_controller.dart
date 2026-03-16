@@ -6,10 +6,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 class FamilyController extends ChangeNotifier {
   // Using a Map for O(1) access by ID
   final Map<String, Person> _people = {};
-  final String _centerPersonId = 'root';
+  String _mainPersonId = 'root';
   String? _selectedPersonId;
 
-  // --- 插入开始：持久化核心逻辑 ---
+  // Getter for current main/center person id
+  String get mainPersonId => _mainPersonId;
+
+  // Set the main/center person for the view
+  void setMainPerson(String id) {
+    if (!_people.containsKey(id)) return;
+    _mainPersonId = id;
+    notifyListeners();
+  }
+
+  // --- 持久化核心逻辑 ---
   static const String _storageKey = 'family_data_v1';
   static const String _aiSystemPrompt =
       '你现在是一位拥有顶尖商业洞察力的家族关系专家。我为你提供了一份结构化的家族图谱 JSON。你的任务是根据 ID 链路进行深层逻辑推理（例如：识别出 A 的父亲的母亲是 A 的奶奶）。在回答时，请基于这些底层关联，提供人性化且深刻的洞见。';
@@ -26,7 +36,7 @@ class FamilyController extends ChangeNotifier {
         ..clear()
         ..addAll(importedPeople);
       _ensureRootPerson();
-      notifyListeners(); // 数据加载完，通知界面刷新
+      notifyListeners();
     }
   }
 
@@ -34,12 +44,10 @@ class FamilyController extends ChangeNotifier {
   Future<void> saveToDisk() async {
     final prefs = await SharedPreferences.getInstance();
     final String encodedData = json.encode(
-      // 这里依赖你 person.dart 里写好的 toMap 方法
       _people.map((key, value) => MapEntry(key, value.toMap())),
     );
     await prefs.setString(_storageKey, encodedData);
   }
-  // --- 插入结束 ---
 
   FamilyController() {
     _initData();
@@ -47,22 +55,16 @@ class FamilyController extends ChangeNotifier {
   }
 
   // Getters
-  Person? get centerPerson => _people[_centerPersonId];
+  Person? get centerPerson => _people[_mainPersonId];
   Person? get selectedPerson =>
       _selectedPersonId != null ? _people[_selectedPersonId] : null;
   List<Person> get allPeople => _people.values.toList();
 
   List<String> get dynamicEventHistory {
-    // 1. 收集所有人的所有礼金记录
     final allRecords = _people.values.expand((p) => p.giftHistory).toList();
-
-    // 2. 按日期倒序排序（最新的在前面）
     allRecords.sort((a, b) => b.date.compareTo(a.date));
-
-    // 3. 去重并取前10个
     final uniqueEvents = <String>{};
     final result = <String>[];
-
     for (var record in allRecords) {
       if (uniqueEvents.add(record.event)) {
         result.add(record.event);
@@ -72,52 +74,31 @@ class FamilyController extends ChangeNotifier {
     return result;
   }
 
-  // AI Context Summary
   String get aiContextSummary {
     final members = _people.values.map((p) {
       final parentRefs = p.parents
-          .map(
-            (parentId) => {
-              'id': parentId,
-              'name': _people[parentId]?.name ?? '',
-            },
-          )
+          .map((parentId) => {'id': parentId, 'name': _people[parentId]?.name ?? ''})
           .toList();
       final childRefs = p.children
-          .map(
-            (childId) => {'id': childId, 'name': _people[childId]?.name ?? ''},
-          )
+          .map((childId) => {'id': childId, 'name': _people[childId]?.name ?? ''})
           .toList();
-      final spouseRef = p.spouse == null
+      final spouseRef = p.spouseId == null
           ? null
-          : {'id': p.spouse!, 'name': _people[p.spouse!]?.name ?? ''};
-
+          : {'id': p.spouseId!, 'name': _people[p.spouseId!]?.name ?? ''};
       return {
         'id': p.id,
         'name': p.name,
-        'relations': {
-          'parents': parentRefs,
-          'spouse': spouseRef,
-          'children': childRefs,
-        },
+        'relations': {'parents': parentRefs, 'spouse': spouseRef, 'children': childRefs},
         'details': {
           'relationship': p.relationship,
           'gender': p.gender,
           'bio': p.bio,
           'giftHistory': p.giftHistory
-              .map(
-                (g) => {
-                  'id': g.id,
-                  'event': g.event,
-                  'amount': g.amount,
-                  'date': g.date.toIso8601String(),
-                },
-              )
+              .map((g) => {'id': g.id, 'event': g.event, 'amount': g.amount, 'date': g.date.toIso8601String()})
               .toList(),
         },
       };
     }).toList();
-
     final graphPayload = {'members': members};
     return '$_aiSystemPrompt\n${json.encode(graphPayload)}';
   }
@@ -135,7 +116,6 @@ class FamilyController extends ChangeNotifier {
     if (importedPeople.isEmpty) {
       throw const FormatException('导入数据为空或格式不正确');
     }
-
     _people
       ..clear()
       ..addAll(importedPeople);
@@ -163,27 +143,20 @@ class FamilyController extends ChangeNotifier {
   List<Person> getParents(String id) {
     final person = _people[id];
     if (person == null) return [];
-    return person.parents
-        .map((pid) => _people[pid])
-        .whereType<Person>()
-        .toList();
+    return person.parents.map((pid) => _people[pid]).whereType<Person>().toList();
   }
 
   // Helper to get children of a person
   List<Person> getChildren(String id) {
     final person = _people[id];
     if (person == null) return [];
-    return person.children
-        .map((cid) => _people[cid])
-        .whereType<Person>()
-        .toList();
+    return person.children.map((cid) => _people[cid]).whereType<Person>().toList();
   }
 
   // Helper to get siblings of a person
   List<Person> getSiblings(String id) {
     final person = _people[id];
     if (person == null || person.parents.isEmpty) return [];
-
     final Set<String> siblingIds = {};
     for (var parentId in person.parents) {
       final parent = _people[parentId];
@@ -191,22 +164,17 @@ class FamilyController extends ChangeNotifier {
         siblingIds.addAll(parent.children);
       }
     }
-
-    // Remove self
     siblingIds.remove(id);
-
     return siblingIds.map((sid) => _people[sid]).whereType<Person>().toList();
   }
 
-  // Calculate generations relative to root
-  // Returns a map where key is generation (0 for root, -1 for parents, etc)
-  // and value is list of people in that generation
+  // Calculate generations relative to main person
   Map<int, List<Person>> calculateGenerations() {
     final Map<int, List<Person>> generations = {};
     final Set<String> visited = {};
     final List<_QueueItem> queue = [];
 
-    final root = _people[_centerPersonId];
+    final root = _people[_mainPersonId];
     if (root == null) return {};
 
     queue.add(_QueueItem(root, 0));
@@ -242,10 +210,10 @@ class FamilyController extends ChangeNotifier {
       }
 
       // Traverse Spouse (same gen)
-      if (person.spouse != null && !visited.contains(person.spouse)) {
-        final spouse = _people[person.spouse];
+      if (person.spouseId != null && !visited.contains(person.spouseId)) {
+        final spouse = _people[person.spouseId];
         if (spouse != null) {
-          visited.add(person.spouse!);
+          visited.add(person.spouseId!);
           queue.add(_QueueItem(spouse, gen));
         }
       }
@@ -259,7 +227,7 @@ class FamilyController extends ChangeNotifier {
       id: 'root',
       name: '我',
       relationship: '本人',
-      gender: '男', // 默认性别
+      gender: '男',
       bio: '这是本人',
       parents: [],
       children: [],
@@ -323,7 +291,7 @@ class FamilyController extends ChangeNotifier {
   }
 
   void _ensureRootPerson() {
-    if (_people.containsKey(_centerPersonId)) {
+    if (_people.containsKey('root')) {
       return;
     }
     _initData();
@@ -342,13 +310,11 @@ class FamilyController extends ChangeNotifier {
 
     final newId = DateTime.now().millisecondsSinceEpoch.toString();
 
-    // --- 自动配偶探测逻辑 ---
     String? existingParentId;
     if (child.parents.isNotEmpty) {
-      existingParentId = child.parents.first; // 已经有一个家长了
+      existingParentId = child.parents.first;
     }
 
-    // 1. 创建新家长
     final parent = Person(
       id: newId,
       name: name,
@@ -356,11 +322,10 @@ class FamilyController extends ChangeNotifier {
       gender: gender,
       bio: bio,
       children: [childId],
-      spouse: existingParentId, // 如果有旧家长，直接指向
+      spouseId: existingParentId,
     );
     _people[newId] = parent;
 
-    // 2. 如果存在旧家长，给旧家长也补上配偶指针
     if (existingParentId != null) {
       final oldParent = _people[existingParentId]!;
       _people[existingParentId] = Person(
@@ -371,13 +336,12 @@ class FamilyController extends ChangeNotifier {
         bio: oldParent.bio,
         parents: oldParent.parents,
         children: oldParent.children,
-        spouse: newId, // 指向新来的
-        spouseId: oldParent.spouseId,
+        spouse: oldParent.spouse,
+        spouseId: newId,
         giftHistory: oldParent.giftHistory,
       );
     }
 
-    // 3. 更新孩子
     _people[childId] = Person(
       id: child.id,
       name: child.name,
@@ -395,7 +359,6 @@ class FamilyController extends ChangeNotifier {
     saveToDisk();
   }
 
-
   // Add Spouse
   void addSpouse(
     String personId,
@@ -407,10 +370,8 @@ class FamilyController extends ChangeNotifier {
     final personA = _people[personId];
     if (personA == null) return;
 
-    // 1. 生成新 ID
     final newId = DateTime.now().millisecondsSinceEpoch.toString();
 
-    // 2. 创建新 Person B，设置 spouseId = personId（指向 A）
     final personB = Person(
       id: newId,
       name: name,
@@ -422,7 +383,6 @@ class FamilyController extends ChangeNotifier {
     );
     _people[newId] = personB;
 
-    // 3. 将 A 的 spouseId 更新为 B 的 ID（重建 Person A）
     _people[personId] = Person(
       id: personA.id,
       name: personA.name,
@@ -436,7 +396,6 @@ class FamilyController extends ChangeNotifier {
       giftHistory: personA.giftHistory,
     );
 
-    // 4. 子女继承：遍历 A 的所有子女，将 B 的 ID 加入每个子女的 parents 列表
     for (final childId in personA.children) {
       final child = _people[childId];
       if (child != null) {
@@ -455,7 +414,6 @@ class FamilyController extends ChangeNotifier {
       }
     }
 
-    // 5. 调用 notifyListeners 和 saveToDisk
     notifyListeners();
     saveToDisk();
   }
@@ -483,7 +441,6 @@ class FamilyController extends ChangeNotifier {
 
     _people[newId] = child;
 
-    // Update parent's children list
     final updatedParent = Person(
       id: parent.id,
       name: parent.name,
@@ -499,7 +456,7 @@ class FamilyController extends ChangeNotifier {
     _people[parentId] = updatedParent;
 
     notifyListeners();
-    saveToDisk(); // <--- 每次数据变化后，同步保存到硬盘
+    saveToDisk();
   }
 
   // Add Gift Record
@@ -600,7 +557,6 @@ class FamilyController extends ChangeNotifier {
 
     if (allRecords.isEmpty) return null;
 
-    // Sort by date descending to find the latest
     allRecords.sort((a, b) => b.date.compareTo(a.date));
     return allRecords.first.date;
   }
@@ -630,7 +586,7 @@ class FamilyController extends ChangeNotifier {
     );
     _people[id] = updatedPerson;
     notifyListeners();
-    saveToDisk(); // <--- 每次数据变化后，同步保存到硬盘
+    saveToDisk();
   }
 
   // Delete Person (Only leaves)
@@ -677,6 +633,26 @@ class FamilyController extends ChangeNotifier {
           giftHistory: child.giftHistory,
         );
         _people[childId] = updatedChild;
+      }
+    }
+
+    // Clear spouseId (and legacy spouse field) for anyone pointing to the deleted person
+    for (var entry in _people.entries.toList()) {
+      final p = entry.value;
+      final hasSpouseRef = p.spouseId == id || p.spouse == id;
+      if (hasSpouseRef) {
+        _people[entry.key] = Person(
+          id: p.id,
+          name: p.name,
+          relationship: p.relationship,
+          gender: p.gender,
+          bio: p.bio,
+          parents: p.parents,
+          children: p.children,
+          spouse: p.spouse == id ? null : p.spouse,
+          spouseId: p.spouseId == id ? null : p.spouseId,
+          giftHistory: p.giftHistory,
+        );
       }
     }
 

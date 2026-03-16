@@ -14,6 +14,7 @@ class PersonDetailsSidebar extends StatelessWidget {
   final VoidCallback onAddSpouse;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback? onSetAsCenter;
 
   const PersonDetailsSidebar({
     super.key,
@@ -25,6 +26,7 @@ class PersonDetailsSidebar extends StatelessWidget {
     required this.onAddSpouse,
     required this.onEdit,
     required this.onDelete,
+    this.onSetAsCenter,
   });
 
   @override
@@ -234,6 +236,14 @@ class PersonDetailsSidebar extends StatelessWidget {
                       label: '编辑信息',
                       onTap: onEdit,
                     ),
+                    if (onSetAsCenter != null &&
+                        person!.id != controller.mainPersonId)
+                      _buildActionButton(
+                        context,
+                        icon: Icons.center_focus_strong,
+                        label: '以此人为中心查看',
+                        onTap: onSetAsCenter!,
+                      ),
                     if (person!.id != 'root')
                       _buildActionButton(
                         context,

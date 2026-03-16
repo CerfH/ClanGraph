@@ -34,7 +34,9 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
     super.initState();
     _selectedPersonId = widget.personId;
     if (widget.initialRecord != null) {
-      _amountController.text = widget.initialRecord!.amount.toStringAsFixed(0); // Assuming integer amount for display
+      _amountController.text = widget.initialRecord!.amount.toStringAsFixed(
+        0,
+      ); // Assuming integer amount for display
       _eventController.text = widget.initialRecord!.event;
       _selectedDate = widget.initialRecord!.date;
     } else {
@@ -65,14 +67,24 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
         widget.controller.updateGiftRecord(_selectedPersonId, updatedRecord);
       } else {
         // Add Mode (including pre-fill mode)
-        widget.controller.addGiftRecord(_selectedPersonId, amount, event, _selectedDate);
+        widget.controller.addGiftRecord(
+          _selectedPersonId,
+          amount,
+          event,
+          _selectedDate,
+        );
 
         // Sync to spouse if checked
         if (_syncToSpouse) {
-           final person = widget.controller.getPerson(_selectedPersonId);
-           if (person != null && person.spouse != null) {
-             widget.controller.addGiftRecord(person.spouse!, amount, event, _selectedDate);
-           }
+          final person = widget.controller.getPerson(_selectedPersonId);
+          if (person != null && person.spouseId != null) {
+            widget.controller.addGiftRecord(
+              person.spouseId!,
+              amount,
+              event,
+              _selectedDate,
+            );
+          }
         }
       }
       Navigator.of(context).pop();
@@ -93,7 +105,8 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
               onPrimary: Colors.white,
               surface: AppTheme.surfaceGrey,
               onSurface: Colors.white,
-            ), dialogTheme: DialogThemeData(backgroundColor: AppTheme.surfaceGrey),
+            ),
+            dialogTheme: DialogThemeData(backgroundColor: AppTheme.surfaceGrey),
           ),
           child: child!,
         );
@@ -109,9 +122,10 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
   @override
   Widget build(BuildContext context) {
     final history = widget.controller.dynamicEventHistory;
-    final isEditMode = widget.initialRecord != null && widget.initialRecord!.id.isNotEmpty;
+    final isEditMode =
+        widget.initialRecord != null && widget.initialRecord!.id.isNotEmpty;
     final person = widget.controller.getPerson(_selectedPersonId);
-    final hasSpouse = person?.spouse != null;
+    final hasSpouse = person?.spouseId != null;
     final allPeople = widget.controller.allPeople;
 
     return Dialog(
@@ -137,7 +151,7 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Member Selection Dropdown (if allowed)
                 if (widget.allowMemberSelection && allPeople.isNotEmpty)
                   DropdownButtonFormField<String>(
@@ -171,7 +185,7 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                     },
                   ),
                 if (widget.allowMemberSelection) const SizedBox(height: 16),
-                
+
                 // 金额输入
                 TextFormField(
                   controller: _amountController,
@@ -232,10 +246,7 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                 if (history.isNotEmpty) ...[
                   const Text(
                     '常用事件',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -251,13 +262,16 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                           ),
                         ),
                         selected: isSelected,
-                        selectedColor: AppTheme.electricBlue.withValues(alpha: 0.6),
+                        selectedColor: AppTheme.electricBlue.withValues(
+                          alpha: 0.6,
+                        ),
                         backgroundColor: Colors.white10,
                         onSelected: (selected) {
                           setState(() {
                             _eventController.text = event;
                             // Event Association Trigger
-                            final defaultDate = widget.controller.getEventDefaultDate(event);
+                            final defaultDate = widget.controller
+                                .getEventDefaultDate(event);
                             if (defaultDate != null) {
                               _selectedDate = defaultDate;
                             }
@@ -275,7 +289,10 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                   onTap: _pickDate,
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
                     decoration: BoxDecoration(
                       border: Border.all(color: Colors.white24),
                       borderRadius: BorderRadius.circular(8),
@@ -287,7 +304,11 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                           '日期: ${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}',
                           style: const TextStyle(color: Colors.white),
                         ),
-                        const Icon(Icons.calendar_today, color: AppTheme.electricBlue, size: 20),
+                        const Icon(
+                          Icons.calendar_today,
+                          color: AppTheme.electricBlue,
+                          size: 20,
+                        ),
                       ],
                     ),
                   ),
@@ -316,7 +337,7 @@ class _GiftRecordDialogState extends State<GiftRecordDialog> {
                   ),
 
                 const SizedBox(height: 24),
-                
+
                 // 按钮
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,

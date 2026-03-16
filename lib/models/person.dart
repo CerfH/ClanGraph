@@ -81,7 +81,7 @@ class Person {
       spouse: spouseRaw == null || spouseRaw.toString().isEmpty
           ? null
           : spouseRaw.toString(),
-      spouseId: spouseIdRaw == null || spouseIdRaw.toString().isEmpty
+      spouseId: (spouseIdRaw == null || spouseIdRaw.toString().isEmpty)
           ? null
           : spouseIdRaw.toString(),
       giftHistory: rawGiftHistory is List

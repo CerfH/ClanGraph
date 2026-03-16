@@ -59,9 +59,37 @@ class DfsExtractor {
     for (final id in bloodRelatives) {
       final person = people[id];
       if (person == null) continue;
-      final spouseId = person.spouseId;
+      final spouseId = person.spouseId ?? person.spouse;
       if (spouseId != null && people.containsKey(spouseId)) {
         result.add(spouseId);
+      }
+    }
+
+    // 叔伯扩展：
+    // 对中心人的每个父母，找到其父母（祖父母），
+    // 将祖父母的子女中不在结果集的兄弟姐妹（叔伯舅姑）加入结果集，
+    // 并对新加入的叔伯执行配偶扩展。
+    final centerPerson = people[centerId]!;
+    for (final parentId in centerPerson.parents) {
+      final parent = people[parentId];
+      if (parent == null) continue;
+      for (final grandpaId in parent.parents) {
+        final grandpa = people[grandpaId];
+        if (grandpa == null) continue;
+        for (final siblingId in grandpa.children) {
+          if (!result.contains(siblingId) && people.containsKey(siblingId)) {
+            result.add(siblingId);
+            // 对新加入的叔伯执行配偶扩展
+            final sibling = people[siblingId];
+            if (sibling != null) {
+              final siblingSpouseId = sibling.spouseId ?? sibling.spouse;
+              if (siblingSpouseId != null &&
+                  people.containsKey(siblingSpouseId)) {
+                result.add(siblingSpouseId);
+              }
+            }
+          }
+        }
       }
     }
 
