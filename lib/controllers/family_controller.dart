@@ -4,31 +4,25 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FamilyController extends ChangeNotifier {
-  // Using a Map for O(1) access by ID
   final Map<String, Person> _people = {};
   String _mainPersonId = 'root';
   String? _selectedPersonId;
 
-  // Getter for current main/center person id
+  static const String _storageKey = 'family_data_v1';
+  static const String _aiSystemPrompt =
+      '你现在是一位拥有顶尖商业洞察力的家族关系专家。我为你提供了一份结构化的家族图谱 JSON。你的任务是根据 ID 链路进行深层逻辑推理（例如：识别出 A 的父亲的母亲是 A 的奶奶）。在回答时，请基于这些底层关联，提供人性化且深刻的洞见。';
+
   String get mainPersonId => _mainPersonId;
 
-  // Set the main/center person for the view
   void setMainPerson(String id) {
     if (!_people.containsKey(id)) return;
     _mainPersonId = id;
     notifyListeners();
   }
 
-  // --- 持久化核心逻辑 ---
-  static const String _storageKey = 'family_data_v1';
-  static const String _aiSystemPrompt =
-      '你现在是一位拥有顶尖商业洞察力的家族关系专家。我为你提供了一份结构化的家族图谱 JSON。你的任务是根据 ID 链路进行深层逻辑推理（例如：识别出 A 的父亲的母亲是 A 的奶奶）。在回答时，请基于这些底层关联，提供人性化且深刻的洞见。';
-
-  // 1. 从硬盘读取数据
   Future<void> loadFromDisk() async {
     final prefs = await SharedPreferences.getInstance();
     final String? encodedData = prefs.getString(_storageKey);
-
     if (encodedData != null) {
       final dynamic decodedData = json.decode(encodedData);
       final importedPeople = _decodePeople(decodedData);
@@ -40,7 +34,6 @@ class FamilyController extends ChangeNotifier {
     }
   }
 
-  // 2. 将数据保存到硬盘
   Future<void> saveToDisk() async {
     final prefs = await SharedPreferences.getInstance();
     final String encodedData = json.encode(
@@ -54,7 +47,6 @@ class FamilyController extends ChangeNotifier {
     loadFromDisk();
   }
 
-  // Getters
   Person? get centerPerson => _people[_mainPersonId];
   Person? get selectedPerson =>
       _selectedPersonId != null ? _people[_selectedPersonId] : null;
@@ -77,10 +69,17 @@ class FamilyController extends ChangeNotifier {
   String get aiContextSummary {
     final members = _people.values.map((p) {
       final parentRefs = p.parents
-          .map((parentId) => {'id': parentId, 'name': _people[parentId]?.name ?? ''})
+          .map(
+            (parentId) => {
+              'id': parentId,
+              'name': _people[parentId]?.name ?? '',
+            },
+          )
           .toList();
       final childRefs = p.children
-          .map((childId) => {'id': childId, 'name': _people[childId]?.name ?? ''})
+          .map(
+            (childId) => {'id': childId, 'name': _people[childId]?.name ?? ''},
+          )
           .toList();
       final spouseRef = p.spouseId == null
           ? null
@@ -88,13 +87,24 @@ class FamilyController extends ChangeNotifier {
       return {
         'id': p.id,
         'name': p.name,
-        'relations': {'parents': parentRefs, 'spouse': spouseRef, 'children': childRefs},
+        'relations': {
+          'parents': parentRefs,
+          'spouse': spouseRef,
+          'children': childRefs,
+        },
         'details': {
           'relationship': p.relationship,
           'gender': p.gender,
           'bio': p.bio,
           'giftHistory': p.giftHistory
-              .map((g) => {'id': g.id, 'event': g.event, 'amount': g.amount, 'date': g.date.toIso8601String()})
+              .map(
+                (g) => {
+                  'id': g.id,
+                  'event': g.event,
+                  'amount': g.amount,
+                  'date': g.date.toIso8601String(),
+                },
+              )
               .toList(),
         },
       };
@@ -125,7 +135,6 @@ class FamilyController extends ChangeNotifier {
     await saveToDisk();
   }
 
-  // Actions
   void selectPerson(String id) {
     _selectedPersonId = id;
     notifyListeners();
@@ -136,24 +145,26 @@ class FamilyController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Helper to get person by ID
   Person? getPerson(String id) => _people[id];
 
-  // Helper to get parents of a person
   List<Person> getParents(String id) {
     final person = _people[id];
     if (person == null) return [];
-    return person.parents.map((pid) => _people[pid]).whereType<Person>().toList();
+    return person.parents
+        .map((pid) => _people[pid])
+        .whereType<Person>()
+        .toList();
   }
 
-  // Helper to get children of a person
   List<Person> getChildren(String id) {
     final person = _people[id];
     if (person == null) return [];
-    return person.children.map((cid) => _people[cid]).whereType<Person>().toList();
+    return person.children
+        .map((cid) => _people[cid])
+        .whereType<Person>()
+        .toList();
   }
 
-  // Helper to get siblings of a person
   List<Person> getSiblings(String id) {
     final person = _people[id];
     if (person == null || person.parents.isEmpty) return [];
@@ -168,7 +179,6 @@ class FamilyController extends ChangeNotifier {
     return siblingIds.map((sid) => _people[sid]).whereType<Person>().toList();
   }
 
-  // Calculate generations relative to main person
   Map<int, List<Person>> calculateGenerations() {
     final Map<int, List<Person>> generations = {};
     final Set<String> visited = {};
@@ -187,7 +197,6 @@ class FamilyController extends ChangeNotifier {
 
       generations.putIfAbsent(gen, () => []).add(person);
 
-      // Traverse Parents (gen - 1)
       for (var parentId in person.parents) {
         if (!visited.contains(parentId)) {
           final parent = _people[parentId];
@@ -198,7 +207,6 @@ class FamilyController extends ChangeNotifier {
         }
       }
 
-      // Traverse Children (gen + 1)
       for (var childId in person.children) {
         if (!visited.contains(childId)) {
           final child = _people[childId];
@@ -209,7 +217,6 @@ class FamilyController extends ChangeNotifier {
         }
       }
 
-      // Traverse Spouse (same gen)
       if (person.spouseId != null && !visited.contains(person.spouseId)) {
         final spouse = _people[person.spouseId];
         if (spouse != null) {
@@ -242,7 +249,6 @@ class FamilyController extends ChangeNotifier {
     if (decoded is Map<String, dynamic>) {
       final members = decoded['members'];
 
-      // 兼容导出格式: {"members":[...]}
       if (members is List) {
         for (final item in members.whereType<Map>()) {
           final person = Person.fromMap(Map<String, dynamic>.from(item));
@@ -253,7 +259,6 @@ class FamilyController extends ChangeNotifier {
         return result;
       }
 
-      // 兼容本地存储格式: {"id": {...person...}}
       decoded.forEach((key, value) {
         if (value is Map) {
           final person = Person.fromMap(Map<String, dynamic>.from(value));
@@ -277,7 +282,6 @@ class FamilyController extends ChangeNotifier {
       return result;
     }
 
-    // 兼容纯数组格式: [{...person...}]
     if (decoded is List) {
       for (final item in decoded.whereType<Map>()) {
         final person = Person.fromMap(Map<String, dynamic>.from(item));
@@ -291,13 +295,10 @@ class FamilyController extends ChangeNotifier {
   }
 
   void _ensureRootPerson() {
-    if (_people.containsKey('root')) {
-      return;
-    }
+    if (_people.containsKey('root')) return;
     _initData();
   }
 
-  // 替换 addParent 方法：实现自动配偶识别
   void addParent(
     String childId,
     String name,
@@ -359,7 +360,6 @@ class FamilyController extends ChangeNotifier {
     saveToDisk();
   }
 
-  // Add Spouse
   void addSpouse(
     String personId,
     String name,
@@ -418,7 +418,6 @@ class FamilyController extends ChangeNotifier {
     saveToDisk();
   }
 
-  // Add Child
   void addChild(
     String parentId,
     String name,
@@ -441,7 +440,7 @@ class FamilyController extends ChangeNotifier {
 
     _people[newId] = child;
 
-    final updatedParent = Person(
+    _people[parentId] = Person(
       id: parent.id,
       name: parent.name,
       relationship: parent.relationship,
@@ -453,13 +452,11 @@ class FamilyController extends ChangeNotifier {
       spouseId: parent.spouseId,
       giftHistory: parent.giftHistory,
     );
-    _people[parentId] = updatedParent;
 
     notifyListeners();
     saveToDisk();
   }
 
-  // Add Gift Record
   void addGiftRecord(
     String personId,
     double amount,
@@ -476,7 +473,7 @@ class FamilyController extends ChangeNotifier {
       date: date,
     );
 
-    final updatedPerson = Person(
+    _people[personId] = Person(
       id: person.id,
       name: person.name,
       relationship: person.relationship,
@@ -489,12 +486,10 @@ class FamilyController extends ChangeNotifier {
       giftHistory: [...person.giftHistory, newGift],
     );
 
-    _people[personId] = updatedPerson;
     notifyListeners();
     saveToDisk();
   }
 
-  // Update Gift Record
   void updateGiftRecord(String personId, GiftRecord record) {
     final person = _people[personId];
     if (person == null) return;
@@ -503,7 +498,7 @@ class FamilyController extends ChangeNotifier {
       return r.id == record.id ? record : r;
     }).toList();
 
-    final updatedPerson = Person(
+    _people[personId] = Person(
       id: person.id,
       name: person.name,
       relationship: person.relationship,
@@ -516,21 +511,15 @@ class FamilyController extends ChangeNotifier {
       giftHistory: updatedHistory,
     );
 
-    _people[personId] = updatedPerson;
     notifyListeners();
     saveToDisk();
   }
 
-  // Delete Gift Record
   void deleteGiftRecord(String personId, String recordId) {
     final person = _people[personId];
     if (person == null) return;
 
-    final updatedHistory = person.giftHistory
-        .where((r) => r.id != recordId)
-        .toList();
-
-    final updatedPerson = Person(
+    _people[personId] = Person(
       id: person.id,
       name: person.name,
       relationship: person.relationship,
@@ -540,15 +529,13 @@ class FamilyController extends ChangeNotifier {
       children: person.children,
       spouse: person.spouse,
       spouseId: person.spouseId,
-      giftHistory: updatedHistory,
+      giftHistory: person.giftHistory.where((r) => r.id != recordId).toList(),
     );
 
-    _people[personId] = updatedPerson;
     notifyListeners();
     saveToDisk();
   }
 
-  // Get Default Date for Event
   DateTime? getEventDefaultDate(String eventName) {
     final allRecords = _people.values
         .expand((p) => p.giftHistory)
@@ -561,7 +548,6 @@ class FamilyController extends ChangeNotifier {
     return allRecords.first.date;
   }
 
-  // Update Person
   void updatePerson(
     String id,
     String name,
@@ -572,7 +558,7 @@ class FamilyController extends ChangeNotifier {
     final person = _people[id];
     if (person == null) return;
 
-    final updatedPerson = Person(
+    _people[id] = Person(
       id: person.id,
       name: name,
       relationship: relationship,
@@ -584,23 +570,20 @@ class FamilyController extends ChangeNotifier {
       spouseId: person.spouseId,
       giftHistory: person.giftHistory,
     );
-    _people[id] = updatedPerson;
     notifyListeners();
     saveToDisk();
   }
 
-  // Delete Person (Only leaves)
   void deletePerson(String id) {
-    if (id == 'root') return; // Cannot delete root
+    if (id == 'root') return;
 
     final person = _people[id];
     if (person == null) return;
 
-    // Remove from parents' children lists
     for (var parentId in person.parents) {
       final parent = _people[parentId];
       if (parent != null) {
-        final updatedParent = Person(
+        _people[parentId] = Person(
           id: parent.id,
           name: parent.name,
           relationship: parent.relationship,
@@ -612,15 +595,13 @@ class FamilyController extends ChangeNotifier {
           spouseId: parent.spouseId,
           giftHistory: parent.giftHistory,
         );
-        _people[parentId] = updatedParent;
       }
     }
 
-    // Remove from children's parents lists
     for (var childId in person.children) {
       final child = _people[childId];
       if (child != null) {
-        final updatedChild = Person(
+        _people[childId] = Person(
           id: child.id,
           name: child.name,
           relationship: child.relationship,
@@ -632,15 +613,12 @@ class FamilyController extends ChangeNotifier {
           spouseId: child.spouseId,
           giftHistory: child.giftHistory,
         );
-        _people[childId] = updatedChild;
       }
     }
 
-    // Clear spouseId (and legacy spouse field) for anyone pointing to the deleted person
     for (var entry in _people.entries.toList()) {
       final p = entry.value;
-      final hasSpouseRef = p.spouseId == id || p.spouse == id;
-      if (hasSpouseRef) {
+      if (p.spouseId == id || p.spouse == id) {
         _people[entry.key] = Person(
           id: p.id,
           name: p.name,
@@ -656,7 +634,6 @@ class FamilyController extends ChangeNotifier {
       }
     }
 
-    // Remove from map
     _people.remove(id);
     if (_selectedPersonId == id) {
       _selectedPersonId = null;
