@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:clangraph/models/person.dart';
+import 'package:clangraph/services/demo_data.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -31,6 +32,18 @@ class FamilyController extends ChangeNotifier {
         ..addAll(importedPeople);
       _ensureRootPerson();
       notifyListeners();
+    } else {
+      // 首次启动：加载预置 Demo 数据
+      await _loadDemoData();
+      await saveToDisk();
+    }
+  }
+
+  Future<void> _loadDemoData() async {
+    try {
+      await importFromJSON(DemoData.json);
+    } catch (_) {
+      _initData();
     }
   }
 

@@ -1,6 +1,9 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 import '../controllers/family_controller.dart';
 import '../models/person.dart';
 import '../services/z_algorithm.dart';
@@ -10,6 +13,7 @@ import '../widgets/spring_button.dart';
 import '../widgets/glassmorphic_container.dart';
 import '../widgets/floating_ai_assistant.dart';
 import '../widgets/export_dialog.dart';
+import '../widgets/stats_dashboard.dart';
 import '../theme/app_theme.dart';
 import 'ai_assistant_view.dart';
 
@@ -45,13 +49,8 @@ class _NodePosition {
 // ─────────────────────────────────────────────
 class GalaxyLayoutEngine {
   // Generation color
-  static Color generationColor(int generation) {
-    if (generation <= -2) return AppTheme.genAncestor2; // 曾祖辈 - 紫
-    if (generation == -1) return AppTheme.genAncestor1; // 祖辈 - 蓝
-    if (generation == 0) return AppTheme.genSelf; // 本辈 - 绿
-    if (generation == 1) return AppTheme.genChild1; // 子辈 - 黄
-    return AppTheme.genChild2; // 孙辈 - 橙
-  }
+  static Color generationColor(int generation) =>
+      AppTheme.generationColor(generation);
 
   /// Build tiered ripple layout.
   static List<_NodePosition> compute({
@@ -277,6 +276,9 @@ class GalaxyPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 深色背景
+    canvas.drawColor(AppTheme.deepSpaceGrey, BlendMode.srcOver);
+
     final center = Offset(size.width / 2, size.height / 2);
     final bool inFocusMode = selectedId != null;
 
@@ -679,6 +681,9 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
   // 布局刷新种子
   int _layoutSeed = DateTime.now().millisecondsSinceEpoch;
 
+  // 图谱截图导出
+  final GlobalKey _treeRepaintKey = GlobalKey();
+
   // 搜索相关
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
@@ -746,22 +751,21 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
       backgroundColor: Colors.transparent,
       // 移除默认边距，让内容撑满屏幕
       constraints: const BoxConstraints(),
-      builder: (context) => Container(
-        width: MediaQuery.of(context).size.width,
-        height: MediaQuery.of(context).size.height * 0.8,
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceGrey,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 8),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.85,
+          child: Scaffold(
+            backgroundColor: AppTheme.surfaceGrey,
+            resizeToAvoidBottomInset: true,
+            body: ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+              child: AIAssistantView(controller: widget.controller),
+            ),
           ),
-        ),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-          ),
-          child: AIAssistantView(controller: widget.controller),
         ),
       ),
     );
@@ -796,6 +800,217 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
     widget.controller.clearSelection();
   }
 
+  /// 截取图谱 + 拼合标题/统计/图例 → 保存到相册。
+  Future<bool> _exportImage() async {
+    try {
+      final boundary =
+          _treeRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return false;
+
+      // 捕获原始图谱
+      final treeImage = await boundary.toImage(pixelRatio: 2.0);
+      // 拼合完整导出图
+      final composed = await _composeExportImage(treeImage);
+      if (composed == null) return false;
+
+      final result = await ImageGallerySaver.saveImage(
+        composed,
+        name: 'family_tree_${DateTime.now().millisecondsSinceEpoch}',
+      );
+      return result['isSuccess'] == true;
+    } catch (e) {
+      debugPrint('截图失败: $e');
+      return false;
+    }
+  }
+
+  /// 将图谱与标题、统计、图例拼合为完整导出图。
+  Future<Uint8List?> _composeExportImage(ui.Image treeImage) async {
+    final people = widget.controller.allPeople;
+    final gens = widget.controller.calculateGenerations();
+    final center = widget.controller.centerPerson;
+    final totalPeople = people.length;
+    final genCount = gens.length;
+
+    const headerH = 100.0;
+    const footerH = 64.0;
+    const padX = 32.0;
+    final totalW = treeImage.width.toDouble() + padX * 2;
+    final totalH = headerH + treeImage.height.toDouble() + footerH;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, totalW, totalH));
+
+    // 背景
+    canvas.drawColor(const Color(0xFF1a1a2e), BlendMode.srcOver);
+
+    // ── 标题 ──
+    _drawText(canvas, '家族智慧图谱',
+        Offset(padX, 18), 24, Colors.white, FontWeight.bold, totalW - padX * 2);
+
+    // ── 统计信息 ──
+    final statsText =
+        '共 $totalPeople 人 · $genCount 代人 · 中心：${center?.name ?? ''}';
+    _drawText(canvas, statsText, Offset(padX, 52), 13, Colors.white54,
+        FontWeight.normal, totalW - padX * 2);
+
+    // ── 分隔线 ──
+    final linePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(padX, 78), Offset(totalW - padX, 78), linePaint);
+
+    // ── 图谱主体 ──
+    canvas.drawImage(treeImage, Offset(padX, headerH), Paint());
+
+    // ── 底部分隔线 ──
+    final treeBottom = headerH + treeImage.height.toDouble();
+    canvas.drawLine(
+        Offset(padX, treeBottom + 6), Offset(totalW - padX, treeBottom + 6), linePaint);
+
+    // ── 图例（动态：只显示实际存在的世代）──
+    final legendY = treeBottom + 18;
+    final genLabels = {
+      -4: '天祖', -3: '高祖', -2: '曾祖', -1: '祖辈',
+      0: '本辈',
+      1: '子辈', 2: '孙辈', 3: '曾孙', 4: '玄孙',
+    };
+    final presentGens = gens.keys.toList()..sort();
+    final legendItems = presentGens
+        .where((g) => genLabels.containsKey(g))
+        .map((g) => (genLabels[g]!, AppTheme.generationColor(g)))
+        .toList();
+
+    var legendX = padX;
+    for (final (label, color) in legendItems) {
+      canvas.drawRect(
+        Rect.fromLTWH(legendX, legendY + 2, 10, 10),
+        Paint()..color = color,
+      );
+      _drawText(canvas, label, Offset(legendX + 16, legendY), 11, Colors.white54,
+          FontWeight.normal, 50);
+      legendX += 56;
+    }
+
+    // ── 日期 ──
+    final now = DateTime.now();
+    final dateStr =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    _drawText(canvas, dateStr, Offset(totalW - padX - 120, legendY), 11,
+        Colors.white30, FontWeight.normal, 120);
+
+    final picture = recorder.endRecording();
+    final exportImage = await picture.toImage(totalW.toInt(), totalH.toInt());
+    final byteData = await exportImage.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  void _drawText(
+    Canvas canvas,
+    String text,
+    Offset offset,
+    double fontSize,
+    Color color,
+    FontWeight fontWeight,
+    double maxWidth,
+  ) {
+    final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
+      textDirection: ui.TextDirection.ltr,
+      textAlign: ui.TextAlign.left,
+      maxLines: 1,
+    ))
+      ..pushStyle(ui.TextStyle(
+        color: color,
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+      ))
+      ..addText(text);
+    final paragraph = builder.build()
+      ..layout(ui.ParagraphConstraints(width: maxWidth));
+    canvas.drawParagraph(paragraph, offset);
+  }
+
+  /// 显示导出菜单：JSON 数据 或 图片
+  void _showExportMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surfaceGrey,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _exportOption(
+                icon: Icons.data_object,
+                title: '导出数据 (JSON)',
+                subtitle: '备份、分享完整家族数据',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  showDialog(
+                    context: context,
+                    builder: (_) => ExportDialog(controller: widget.controller),
+                  );
+                },
+              ),
+              _exportOption(
+                icon: Icons.image,
+                title: '导出图谱图片',
+                subtitle: '带标题、统计和图例 → 保存到相册',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  _showLoading(true);
+                  final ok = await _exportImage();
+                  if (mounted) {
+                    _showLoading(false);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(ok ? '已保存到相册 ✅' : '保存失败，请检查相册权限'),
+                        backgroundColor: ok ? Colors.green : Colors.red,
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showLoading(bool show) {
+    if (show) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+    } else {
+      Navigator.pop(context);
+    }
+  }
+
+  Widget _exportOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: AppTheme.electricBlue.withValues(alpha: 0.15),
+        child: Icon(icon, color: AppTheme.electricBlue),
+      ),
+      title: Text(title, style: const TextStyle(color: Colors.white)),
+      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+      onTap: onTap,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -806,12 +1021,24 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
         centerTitle: true,
         actions: [
           IconButton(
-            tooltip: '导出与分享',
-            icon: const Icon(Icons.share),
-            onPressed: () => showDialog(
-              context: context,
-              builder: (ctx) => ExportDialog(controller: widget.controller),
+            tooltip: '数据统计',
+            icon: const Icon(Icons.bar_chart),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => StatsDashboard(controller: widget.controller),
+              ),
             ),
+          ),
+          IconButton(
+            tooltip: '导入恢复',
+            icon: const Icon(Icons.download),
+            onPressed: _showImportDialog,
+          ),
+          IconButton(
+            tooltip: '导出',
+            icon: const Icon(Icons.ios_share),
+            onPressed: _showExportMenu,
           ),
         ],
       ),
@@ -913,16 +1140,19 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                             _flowCtrl,
                             _selectedBreathCtrl,
                           ]),
-                          builder: (context, _) => CustomPaint(
-                            size: canvasSize,
-                            painter: GalaxyPainter(
-                              nodes: animatedNodes,
-                              people: widget.controller.allPeople,
-                              selectedId: _focusedId,
-                              highlightedIds: highlightedIds,
-                              breathPhase: _breathCtrl.value,
-                              flowPhase: _flowCtrl.value,
-                              selectedBreathPhase: _selectedBreathCtrl.value,
+                          builder: (context, _) => RepaintBoundary(
+                            key: _treeRepaintKey,
+                            child: CustomPaint(
+                              size: canvasSize,
+                              painter: GalaxyPainter(
+                                nodes: animatedNodes,
+                                people: widget.controller.allPeople,
+                                selectedId: _focusedId,
+                                highlightedIds: highlightedIds,
+                                breathPhase: _breathCtrl.value,
+                                flowPhase: _flowCtrl.value,
+                                selectedBreathPhase: _selectedBreathCtrl.value,
+                              ),
                             ),
                           ),
                         ),
@@ -1022,36 +1252,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                       ),
                     ),
 
-                  // 4. 底部备份按钮组（毛玻璃）
-                  Positioned(
-                    top: 80,
-                    left: 0,
-                    right: 0,
-                    child: SafeArea(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildBackupActionButton(
-                            icon: Icons.ios_share_rounded,
-                            label: '导出备份',
-                            onTap: () => showDialog(
-                              context: context,
-                              builder: (ctx) =>
-                                  ExportDialog(controller: widget.controller),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          _buildBackupActionButton(
-                            icon: Icons.download_rounded,
-                            label: '导入恢复',
-                            onTap: _showImportDialog,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // 5. Detail sidebar (仅点击按钮后显示)
+                  // 4. Detail sidebar (仅点击按钮后显示)
                   if (_showDetailSidebar && latestSelectedPerson != null)
                     Positioned(
                       right: 0,
@@ -1105,88 +1306,6 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
         child: FloatingAIAssistant(onTap: _showAIAssistant, isRightSide: true),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-    );
-  }
-
-  Widget _buildBackupActionButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    final borderRadius = BorderRadius.circular(18);
-
-    return SpringButton(
-      hapticType: HapticFeedbackType.medium,
-      onTap: onTap,
-      // 这里的参数完全对齐你的 SearchGlassmorphicContainer，保证顶级质感
-      child: GlassmorphicContainer(
-        blurSigma: 25.0,
-        backgroundColor: const Color.fromARGB(
-          255,
-          255,
-          255,
-          255,
-        ).withValues(alpha: 0.03),
-        borderRadius: borderRadius,
-        borderWidth: 0.5, // 细边框，精致不突兀
-        borderColor: Colors.white.withValues(alpha: 0.3),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withValues(alpha: 0.20),
-            Colors.white.withValues(alpha: 0.10),
-            Colors.black.withValues(alpha: 0.05),
-          ],
-          stops: const [0.0, 0.15, 1.0],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
-            blurRadius: 40,
-            spreadRadius: -8,
-            offset: const Offset(0, 15),
-          ),
-          BoxShadow(
-            color: Colors.white.withValues(alpha: 0.25),
-            blurRadius: 15,
-            spreadRadius: -2,
-            offset: const Offset(0, -1),
-          ),
-        ],
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: borderRadius,
-            splashColor: Colors.white.withValues(alpha: 0.15),
-            highlightColor: Colors.white.withValues(alpha: 0.08),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    icon,
-                    color: Colors.white.withValues(alpha: 0.85),
-                    size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.9),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 

@@ -39,6 +39,8 @@ dependencies:
   dio: ^5.9.2
   image_picker: ^1.2.1
   flutter_image_compress: ^2.3.0
+  fl_chart: ^0.70.2
+  image_gallery_saver: ^2.0.3
 
 dev_dependencies:
   flutter_test:

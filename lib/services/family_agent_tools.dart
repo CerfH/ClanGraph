@@ -79,6 +79,59 @@ class FamilyAgentTools {
         },
       },
     },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'recommend_gift_amount',
+        'description':
+            '根据历史礼金记录和亲疏关系，为指定成员和事件类型推荐合适的礼金金额范围。调用时机：用户询问"该给多少钱"、"随多少礼"、"礼金建议"等。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'member': {'type': 'string', 'description': '送礼对象的姓名或称呼，例如 表哥、叔叔'},
+            'event': {
+              'type': 'string',
+              'description': '事件类型，例如 结婚、生日、满月、春节、乔迁',
+            },
+          },
+          'required': ['member', 'event'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'add_family_member',
+        'description':
+            '通过对话创建新的家族成员并自动建立关系。当用户说"加个人"、"添加"、"录入"、"我有个XX叫YY"时调用。先调用 search_family_members 确认不重复，再调用本工具。',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'name': {'type': 'string', 'description': '新成员姓名'},
+            'gender': {
+              'type': 'string',
+              'enum': ['男', '女'],
+              'description': '性别',
+            },
+            'relation_to': {
+              'type': 'string',
+              'description': '关联到的已有成员 ID、姓名或称呼，例如 爸爸、root',
+            },
+            'relation_type': {
+              'type': 'string',
+              'enum': ['parent', 'child', 'spouse'],
+              'description':
+                  '关系类型：parent=新成员是 relation_to 的父母，child=新成员是 relation_to 的子女，spouse=新成员是 relation_to 的配偶',
+            },
+            'bio': {
+              'type': 'string',
+              'description': '备注信息，可选',
+            },
+          },
+          'required': ['name', 'gender', 'relation_to', 'relation_type'],
+        },
+      },
+    },
   ];
 
   static String displayName(String toolName) {
@@ -88,6 +141,8 @@ class FamilyAgentTools {
       'get_family_branch' => '读取家族分支',
       'get_gift_summary' => '统计礼金往来',
       'set_graph_center' => '切换图谱中心',
+      'recommend_gift_amount' => '推荐礼金',
+      'add_family_member' => '添加成员',
       _ => toolName,
     };
   }
@@ -106,6 +161,11 @@ class FamilyAgentTools {
       ),
       'get_gift_summary' => _giftSummary(arguments['member']?.toString()),
       'set_graph_center' => _setCenter(arguments['member']?.toString() ?? ''),
+      'recommend_gift_amount' => _recommendGift(
+        arguments['member']?.toString() ?? '',
+        arguments['event']?.toString() ?? '',
+      ),
+      'add_family_member' => _addMember(arguments),
       _ => {'ok': false, 'error': '未知工具: $toolName'},
     };
   }
@@ -231,6 +291,191 @@ class FamilyAgentTools {
     };
   }
 
+  // ─── 礼金推荐 ─────────────────────────────────────────
+
+  Map<String, dynamic> _recommendGift(String member, String event) {
+    final person = _resolve(member);
+    if (person == null) return {'ok': false, 'error': '未找到成员：$member'};
+    if (event.isEmpty) return {'ok': false, 'error': '请提供事件类型'};
+
+    // 收集全家族礼金记录，事件名模糊匹配
+    final allGifts = controller.allPeople
+        .expand((p) => p.giftHistory.map((r) => (person: p, record: r)))
+        .toList();
+
+    // 模糊匹配：包含关系即命中（"喜事" ↔ "结婚喜事"）
+    bool eventMatch(String recordEvent) {
+      final a = recordEvent.toLowerCase();
+      final b = event.toLowerCase();
+      return a.contains(b) || b.contains(a);
+    }
+
+    final matchedRecords = allGifts
+        .where((g) => eventMatch(g.record.event))
+        .toList();
+
+    // 如果没有匹配的记录，用全部记录做参考（至少给个全局参考值）
+    final useGeneric = matchedRecords.isEmpty;
+    final records = useGeneric ? allGifts : matchedRecords;
+
+    if (records.isEmpty) {
+      return {
+        'ok': true,
+        'member': _basicMember(person),
+        'event': event,
+        'recommendation': '暂无任何礼金记录，建议参考当地习俗或询问长辈。',
+        'range_min': null,
+        'range_max': null,
+        'average': null,
+        'sample_count': 0,
+      };
+    }
+
+    final amounts = records.map((g) => g.record.amount).toList()..sort();
+    final avg = amounts.fold<double>(0, (s, a) => s + a) / amounts.length;
+
+    // 判断亲疏：BFS 计算路径距离
+    final distance = _pedigreeDistance(controller.mainPersonId, person.id);
+    final isClose = distance != null && distance <= 2; // 1-2步为近亲
+
+    // 相近关系层记录
+    final closeAmounts = records
+        .where((g) {
+          final d = _pedigreeDistance(controller.mainPersonId, g.person.id);
+          return d != null && d <= 2;
+        })
+        .map((g) => g.record.amount)
+        .toList();
+    final closeAvg = closeAmounts.isEmpty
+        ? avg
+        : closeAmounts.fold<double>(0, (s, a) => s + a) / closeAmounts.length;
+
+    final suggestionMin = (closeAvg * 0.8).roundToDouble();
+    final suggestionMax = (closeAvg * 1.3).roundToDouble();
+
+    return {
+      'ok': true,
+      'member': _basicMember(person),
+      'event': event,
+      'match_mode': useGeneric ? '无同类事件，展示全局参考' : '精确匹配',
+      'relationship_closeness': isClose ? '近亲（1-2步）' : '远亲（3步以上）',
+      'recommended_range': '$suggestionMin - $suggestionMax 元',
+      'historical_average': avg.roundToDouble(),
+      'close_relation_average': closeAvg.roundToDouble(),
+      'sample_count': records.length,
+      'matched_count': matchedRecords.length,
+      'historical_min': amounts.first,
+      'historical_max': amounts.last,
+      'recent_examples': records
+          .take(5)
+          .map((g) => {
+                'name': g.person.name,
+                'amount': g.record.amount,
+                'event': g.record.event,
+                'date': g.record.date.toIso8601String(),
+              })
+          .toList(),
+    };
+  }
+
+  /// BFS 计算两人之间的谱系距离（步数），用于判断亲疏。
+  int? _pedigreeDistance(String from, String to) {
+    if (from == to) return 0;
+    final visited = <String>{from};
+    final queue = <_QueueEntry>[_QueueEntry(from, 0)];
+
+    while (queue.isNotEmpty) {
+      final cur = queue.removeAt(0);
+      final neighbors = _neighborIds(cur.id);
+      for (final nid in neighbors) {
+        if (nid == to) return cur.distance + 1;
+        if (visited.add(nid)) {
+          queue.add(_QueueEntry(nid, cur.distance + 1));
+        }
+      }
+    }
+    return null;
+  }
+
+  Set<String> _neighborIds(String personId) {
+    final person = controller.getPerson(personId);
+    if (person == null) return {};
+    final ids = <String>{...person.parents, ...person.children};
+    if (person.spouseId != null) ids.add(person.spouseId!);
+    // 反向配偶
+    for (final p in controller.allPeople) {
+      if (p.spouseId == personId) ids.add(p.id);
+    }
+    return ids;
+  }
+
+  // ─── 对话式添加成员 ────────────────────────────────────
+
+  Map<String, dynamic> _addMember(Map<String, dynamic> args) {
+    final name = args['name']?.toString().trim() ?? '';
+    final gender = args['gender']?.toString() ?? '男';
+    final relationTo = args['relation_to']?.toString().trim() ?? '';
+    final relationType = args['relation_type']?.toString() ?? '';
+    final bio = args['bio']?.toString() ?? '';
+
+    if (name.isEmpty) return {'ok': false, 'error': '姓名不能为空'};
+    if (relationTo.isEmpty) return {'ok': false, 'error': '请指定关联到哪位已有成员'};
+
+    final existing = _resolve(relationTo);
+    if (existing == null) {
+      return {'ok': false, 'error': '未找到关联成员：$relationTo，请先用 search_family_members 查找'};
+    }
+
+    // 检查重名
+    final dupCheck = controller.allPeople.where(
+      (p) => p.name == name,
+    );
+    if (dupCheck.isNotEmpty) {
+      return {
+        'ok': false,
+        'error': '已存在名为"$name"的成员（ID: ${dupCheck.first.id}），请确认是否重复',
+      };
+    }
+
+    try {
+      switch (relationType) {
+        case 'parent':
+          controller.addParent(
+            existing.id,
+            name,
+            relationType == 'parent' && gender == '男' ? '爸爸' : '妈妈',
+            bio,
+            gender,
+          );
+          break;
+        case 'child':
+          controller.addChild(existing.id, name, '', bio, gender);
+          break;
+        case 'spouse':
+          controller.addSpouse(existing.id, name, '', bio, gender);
+          break;
+        default:
+          return {'ok': false, 'error': '不支持的关系类型：$relationType，可选 parent/child/spouse'};
+      }
+
+      // 找到刚创建的新成员
+      final created = controller.allPeople.firstWhere(
+        (p) => p.name == name,
+        orElse: () => existing,
+      );
+
+      return {
+        'ok': true,
+        'message': '已添加：$name（${gender}），作为 ${existing.name} 的 ${relationType == 'parent' ? '父母' : relationType == 'child' ? '子女' : '配偶'}',
+        'created_member': _basicMember(created),
+        'related_to': _basicMember(existing),
+        'relation_type': relationType,
+      };
+    } catch (e) {
+      return {'ok': false, 'error': '添加失败：$e'};
+    }
+  }
+
   Person? _resolve(String value) {
     final normalized = value.trim().toLowerCase();
     if (normalized.isEmpty) return null;
@@ -309,4 +554,10 @@ class FamilyAgentTools {
     'relationship': person.relationship,
     'gender': person.gender,
   };
+}
+
+class _QueueEntry {
+  final String id;
+  final int distance;
+  const _QueueEntry(this.id, this.distance);
 }

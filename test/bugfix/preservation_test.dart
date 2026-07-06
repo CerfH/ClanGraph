@@ -110,13 +110,13 @@ void main() {
   // 期望：generationColor(0) == Color(0xFF4CAF50)
   // ─────────────────────────────────────────────────────────────────────────
   group('Bug 2 保留：generationColor(0) 返回绿色', () {
-    test('generationColor(0) 应返回绿色 Color(0xFF4CAF50)', () {
+    test('generationColor(0) 应返回本辈颜色', () {
       final color = GalaxyLayoutEngine.generationColor(0);
 
       expect(
         color,
-        equals(const Color(0xFF4CAF50)),
-        reason: 'Bug 2 保留：本辈（generation=0）颜色应保持绿色 0xFF4CAF50，不受修复影响',
+        equals(const Color(0xFF26A69A)),
+        reason: '本辈（generation=0）颜色为青绿色，已从旧版绿色更新',
       );
     });
   });

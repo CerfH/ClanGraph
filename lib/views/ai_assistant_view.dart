@@ -553,33 +553,59 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   }
 
   Widget _buildAgentSuggestions({required bool compact}) {
-    const suggestions = ['爸爸有哪些子女？', '统计全家族礼金总额', '把图谱切换到爸爸为中心'];
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, compact ? 8 : 16, 16, 0),
+    // 常驻能力标签（始终可见）
+    const capabilities = [
+      (Icons.search, '搜索'),
+      (Icons.people, '详情'),
+      (Icons.account_tree, '分支'),
+      (Icons.pie_chart, '统计'),
+      (Icons.recommend, '推荐'),
+      (Icons.person_add, '录入'),
+      (Icons.center_focus_strong, '中心'),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.02),
+        border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.04))),
+      ),
+      padding: compact
+          ? const EdgeInsets.symmetric(vertical: 6)
+          : const EdgeInsets.fromLTRB(12, 10, 12, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           if (!compact) ...[
-            const Text(
-              '试试让 Agent 查询或操作家谱',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 8),
+              child: Text('试试输入或点击：',
+                  style: TextStyle(color: Colors.white38, fontSize: 11)),
             ),
-            const SizedBox(height: 10),
           ],
           SizedBox(
-            height: 38,
+            height: compact ? 28 : 32,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: suggestions.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              itemCount: capabilities.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
               itemBuilder: (context, index) {
-                final suggestion = suggestions[index];
+                final (icon, label) = capabilities[index];
                 return ActionChip(
-                  label: Text(suggestion),
+                  avatar: Icon(icon, size: 14, color: AppTheme.electricBlue),
+                  label: Text(label,
+                      style: TextStyle(
+                          color: Colors.white70, fontSize: compact ? 11 : 12)),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  padding: compact
+                      ? const EdgeInsets.symmetric(horizontal: 6)
+                      : const EdgeInsets.symmetric(horizontal: 8),
                   onPressed: _isLoading
                       ? null
                       : () {
-                          _inputController.text = suggestion;
+                          _inputController.text = _promptForCapability(index);
                           _sendMessage();
                         },
                 );
@@ -589,6 +615,19 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         ],
       ),
     );
+  }
+
+  String _promptForCapability(int index) {
+    return switch (index) {
+      0 => '帮我搜索家族成员',
+      1 => '查看家族成员的详细信息',
+      2 => '展开家族分支看看',
+      3 => '统计全家族礼金',
+      4 => '帮我推荐礼金金额',
+      5 => '帮我添加一个新成员',
+      6 => '切换到以别人为中心',
+      _ => '',
+    };
   }
 
   Widget _buildInputArea() {
