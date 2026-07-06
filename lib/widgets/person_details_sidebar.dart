@@ -99,7 +99,7 @@ class PersonDetailsSidebar extends StatelessWidget {
                     ),
                     Center(
                       child: Text(
-                        controller.getDisplayName(person!.id),
+                        person!.relationship,
                         style: const TextStyle(
                           color: AppTheme.electricBlue,
                           fontSize: 16,

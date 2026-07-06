@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:clangraph/models/person.dart';
-import 'package:clangraph/services/kinship_engine.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,55 +12,7 @@ class FamilyController extends ChangeNotifier {
   static const String _aiSystemPrompt =
       '你现在是一位拥有顶尖商业洞察力的家族关系专家。我为你提供了一份结构化的家族图谱 JSON。你的任务是根据 ID 链路进行深层逻辑推理（例如：识别出 A 的父亲的母亲是 A 的奶奶）。在回答时，请基于这些底层关联，提供人性化且深刻的洞见。';
 
-  late final KinshipEngine _kinshipEngine = KinshipEngine(this);
-
-  /// 显示名称缓存，以中心人物为基准。切换中心或修改数据时失效。
-  final Map<String, String> _displayNames = {};
-
-  @override
-  void notifyListeners() {
-    _displayNames.clear();
-    super.notifyListeners();
-  }
-
   String get mainPersonId => _mainPersonId;
-
-  /// 获取某人物在当前中心视角下的口语称呼（动态计算）。
-  String getDisplayName(String personId) {
-    if (personId == _mainPersonId) return '本人';
-    // 优先走缓存
-    if (_displayNames.containsKey(personId)) return _displayNames[personId]!;
-    // 同步计算
-    final term = _kinshipEngine.computeSync(_mainPersonId, personId);
-    if (term != null && term.isNotEmpty) {
-      _displayNames[personId] = term;
-      return term;
-    }
-    // fallback：存储的 relationship
-    return _people[personId]?.relationship ?? '';
-  }
-
-  /// 异步获取显示名称，支持 AI 兜底。
-  Future<String> getDisplayNameAsync(String personId) async {
-    if (personId == _mainPersonId) return '本人';
-    final term = await _kinshipEngine.compute(_mainPersonId, personId);
-    if (term.isNotEmpty) {
-      _displayNames[personId] = term;
-      return term;
-    }
-    return _people[personId]?.relationship ?? '';
-  }
-
-  /// 预计算所有成员的显示名称（同步），适合图谱刷新时调用。
-  void precomputeDisplayNames() {
-    _displayNames.clear();
-    for (final person in _people.values) {
-      _displayNames[person.id] = getDisplayName(person.id);
-    }
-  }
-
-  /// 获取 KinshipEngine，供需要异步 AI 兜底的场景使用。
-  KinshipEngine get kinshipEngine => _kinshipEngine;
 
   void setMainPerson(String id) {
     if (!_people.containsKey(id)) return;
