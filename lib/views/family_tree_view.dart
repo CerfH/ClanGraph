@@ -704,12 +704,17 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
   // 详细信息侧边栏显示控制
   bool _showDetailSidebar = false;
 
+  // AI 称呼预热标记
+  bool _namesWarmedUp = false;
+
   @override
   void initState() {
     super.initState();
     _searchCtrl.addListener(() {
       setState(() => _searchQuery = _searchCtrl.text.trim());
     });
+    // 图谱首帧渲染后，后台异步通过 AI 计算所有远亲称呼
+    WidgetsBinding.instance.addPostFrameCallback((_) => _warmUpNames());
     _breathCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
@@ -799,6 +804,14 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
       _showDetailSidebar = false;
     });
     widget.controller.clearSelection();
+  }
+
+  /// 后台通过 AI 预热所有 2 步以上关系的称呼。
+  Future<void> _warmUpNames() async {
+    if (_namesWarmedUp) return;
+    _namesWarmedUp = true;
+    await widget.controller.precomputeDisplayNamesAsync();
+    if (mounted) setState(() {});
   }
 
   @override
