@@ -13,12 +13,14 @@ import '../widgets/export_dialog.dart';
 import '../theme/app_theme.dart';
 import 'ai_assistant_view.dart';
 
-// 搜索匹配算法: 匹配 name 或 relationship (case-insensitive)
-bool _personMatchesQuery(Person p, String query) {
+// 搜索匹配算法: 匹配 name、relationship、或动态称呼 (case-insensitive)
+bool _personMatchesQuery(Person p, String query, Map<String, String> displayNames) {
   if (query.isEmpty) return false;
   final q = query.toLowerCase();
+  final displayName = displayNames[p.id] ?? '';
   return p.name.toLowerCase().contains(q) ||
-      p.relationship.toLowerCase().contains(q);
+      p.relationship.toLowerCase().contains(q) ||
+      displayName.toLowerCase().contains(q);
 }
 
 // ─────────────────────────────────────────────
@@ -106,6 +108,8 @@ class GalaxyPainter extends CustomPainter {
   // 选中节点的呼吸缩放 [0, 1]
   final double selectedBreathPhase;
 
+  final Map<String, String> displayNames;
+
   const GalaxyPainter({
     required this.nodes,
     required this.people,
@@ -114,6 +118,7 @@ class GalaxyPainter extends CustomPainter {
     this.breathPhase = 0.0,
     this.flowPhase = 0.0,
     this.selectedBreathPhase = 0.0,
+    this.displayNames = const {},
   });
 
   // 快速查找: id -> Person
@@ -624,8 +629,8 @@ class GalaxyPainter extends CustomPainter {
       textAlign: TextAlign.center,
     )..layout(maxWidth: r * 2);
 
-    // Relationship label
-    final rel = node.person.relationship;
+    // Display name (dynamically computed kinship term)
+    final rel = displayNames[node.person.id] ?? node.person.relationship;
     final relPainter = TextPainter(
       text: TextSpan(
         text: rel.length > 4 ? rel.substring(0, 4) : rel,
@@ -848,11 +853,18 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                 seed: _layoutSeed,
               );
 
-              // 搜索高亮: 匹配到的节点 ID
+              // 预计算所有成员的动态称呼（根据当前中心人物）
+              widget.controller.precomputeDisplayNames();
+              final displayNames = <String, String>{};
+              for (final p in widget.controller.allPeople) {
+                displayNames[p.id] = widget.controller.getDisplayName(p.id);
+              }
+
+              // 搜索高亮: 匹配到的节点 ID（同时搜索名称、关系、动态称呼）
               final highlightedIds = _searchQuery.isEmpty
                   ? <String>{}
                   : widget.controller.allPeople
-                        .where((p) => _personMatchesQuery(p, _searchQuery))
+                        .where((p) => _personMatchesQuery(p, _searchQuery, displayNames))
                         .map((p) => p.id)
                         .toSet();
 
@@ -923,6 +935,7 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
                               breathPhase: _breathCtrl.value,
                               flowPhase: _flowCtrl.value,
                               selectedBreathPhase: _selectedBreathCtrl.value,
+                              displayNames: displayNames,
                             ),
                           ),
                         ),
