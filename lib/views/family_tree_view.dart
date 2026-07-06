@@ -805,8 +805,14 @@ class _FamilyTreeViewState extends State<FamilyTreeView>
         elevation: 0,
         centerTitle: true,
         actions: [
-          IconButton(icon: const Icon(Icons.share), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.settings), onPressed: () {}),
+          IconButton(
+            tooltip: '导出与分享',
+            icon: const Icon(Icons.share),
+            onPressed: () => showDialog(
+              context: context,
+              builder: (ctx) => ExportDialog(controller: widget.controller),
+            ),
+          ),
         ],
       ),
       body: ListenableBuilder(

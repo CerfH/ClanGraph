@@ -8,8 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../controllers/family_controller.dart';
 import '../services/ai_service.dart';
+import '../services/family_agent_tools.dart';
 import '../models/person.dart';
-
 
 class AIAssistantView extends StatefulWidget {
   final FamilyController controller;
@@ -23,7 +23,7 @@ class AIAssistantView extends StatefulWidget {
 class _AIAssistantViewState extends State<AIAssistantView> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  
+
   /// 消息列表 - 使用 dynamic 以支持 isJsonData 字段
   /// 每条消息包含: role, content, isJsonData
   final List<Map<String, dynamic>> _messages = [];
@@ -60,7 +60,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         setState(() {
           _messages.clear();
           _messages.addAll(
-            decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+            decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
           );
         });
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
@@ -189,7 +189,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       builder: (BuildContext context) => CupertinoActionSheet(
         title: const Text('上传礼金单据', style: TextStyle(color: Colors.white70)),
         message: _selectedImages.isNotEmpty
-            ? Text('已选择 ${_selectedImages.length} 张图片', style: const TextStyle(color: Colors.white54, fontSize: 12))
+            ? Text(
+                '已选择 ${_selectedImages.length} 张图片',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              )
             : null,
         actions: <CupertinoActionSheetAction>[
           CupertinoActionSheetAction(
@@ -208,7 +211,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           ),
           if (_selectedImages.isNotEmpty)
             CupertinoActionSheetAction(
-              child: const Text('清空已选图片', style: TextStyle(color: Colors.redAccent)),
+              child: const Text(
+                '清空已选图片',
+                style: TextStyle(color: Colors.redAccent),
+              ),
               onPressed: () {
                 Navigator.pop(context);
                 _clearSelectedImages();
@@ -244,11 +250,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             ? '正在识别${imagesToSend.length}张图片...'
             : '正在识别图片...';
       } else {
-        _messages.add({
-          'role': 'user',
-          'content': text,
-          'isJsonData': false,
-        });
+        _messages.add({'role': 'user', 'content': text, 'isJsonData': false});
         _loadingText = '正在思考中...';
       }
       _isLoading = true;
@@ -266,7 +268,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       if (imagesToSend.isNotEmpty) {
         if (imagesToSend.length == 1) {
           // 单图识别
-          response = await _aiService.analyzeImage(imagesToSend.first, contextData);
+          response = await _aiService.analyzeImage(
+            imagesToSend.first,
+            contextData,
+          );
         } else {
           // 多图并发识别
           response = await _aiService.analyzeImages(imagesToSend, contextData);
@@ -286,22 +291,28 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         });
       } else {
         // 传递完整消息历史，实现长上下文记忆
-        response = await _aiService.askAgent(
+        final agentTools = FamilyAgentTools(widget.controller);
+        final agentResult = await _aiService.askAgentWithTools(
           text,
           contextData,
-          history: _messages,
+          history: _messages.length > 1
+              ? _messages.sublist(0, _messages.length - 1)
+              : const [],
+          tools: FamilyAgentTools.definitions,
+          executeTool: agentTools.execute,
         );
+        response = agentResult.content;
         setState(() {
           _messages.add({
             'role': 'ai',
             'content': response,
             'isJsonData': false,
+            'toolTrace': agentResult.toolsUsed,
           });
         });
       }
 
       await _saveChatHistory();
-
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -337,24 +348,25 @@ class _AIAssistantViewState extends State<AIAssistantView> {
 
     // 后台自动同步：遍历记录并直接写入数据
     int successCount = 0;
-    
+
     for (final item in items) {
       final isNew = item['is_new'] == true;
-      
+
       // 忽略新成员：若 is_new 为 true 或找不到匹配成员，直接跳过
       if (isNew) continue;
-      
+
       // 通过 _findMatchingPersonId 找到家谱中对应的成员 ID
       final personId = _findMatchingPersonId(item);
-      
+
       // 如果找不到匹配成员（返回 root 表示未匹配），跳过
       if (personId == 'root') continue;
-      
+
       // 提取金额、事件和日期字段
       final amount = _parseAmount(item['amount']);
       final event = item['event']?.toString() ?? '';
-      final date = DateTime.tryParse(item['date']?.toString() ?? '') ?? DateTime.now();
-      
+      final date =
+          DateTime.tryParse(item['date']?.toString() ?? '') ?? DateTime.now();
+
       // 直接写入数据
       widget.controller.addGiftRecord(personId, amount, event, date);
       successCount++;
@@ -421,11 +433,12 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   /// 智能匹配成员 ID
   String _findMatchingPersonId(Map<String, dynamic> data) {
     // 优先使用 AI 返回的 matched_id
-    if (data['matched_id'] != null && data['matched_id'].toString().isNotEmpty) {
+    if (data['matched_id'] != null &&
+        data['matched_id'].toString().isNotEmpty) {
       final person = widget.controller.getPerson(data['matched_id'].toString());
       if (person != null) return person.id;
     }
-    
+
     // 尝试通过姓名匹配
     final name = data['name']?.toString();
     if (name != null && name.isNotEmpty) {
@@ -438,7 +451,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         if (p.name.contains(name) || name.contains(p.name)) return p.id;
       }
     }
-    
+
     // 默认返回 root
     return 'root';
   }
@@ -475,7 +488,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         children: [
           // Header
           _buildHeader(),
-          
+
+          _buildAgentSuggestions(compact: _messages.isNotEmpty),
+
           // Chat Area
           Expanded(
             child: ListView.builder(
@@ -537,6 +552,45 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     );
   }
 
+  Widget _buildAgentSuggestions({required bool compact}) {
+    const suggestions = ['爸爸有哪些子女？', '统计全家族礼金总额', '把图谱切换到爸爸为中心'];
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, compact ? 8 : 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!compact) ...[
+            const Text(
+              '试试让 Agent 查询或操作家谱',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+          ],
+          SizedBox(
+            height: 38,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: suggestions.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final suggestion = suggestions[index];
+                return ActionChip(
+                  label: Text(suggestion),
+                  onPressed: _isLoading
+                      ? null
+                      : () {
+                          _inputController.text = suggestion;
+                          _sendMessage();
+                        },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInputArea() {
     return Container(
       decoration: BoxDecoration(
@@ -553,7 +607,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                 color: AppTheme.electricBlue,
                 backgroundColor: Colors.white10,
               ),
-            
+
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -591,14 +645,19 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                                         top: 0,
                                         right: 0,
                                         child: GestureDetector(
-                                          onTap: () => _removeSelectedImage(index),
+                                          onTap: () =>
+                                              _removeSelectedImage(index),
                                           child: Container(
                                             padding: const EdgeInsets.all(2),
                                             decoration: const BoxDecoration(
                                               color: Colors.black54,
                                               shape: BoxShape.circle,
                                             ),
-                                            child: const Icon(Icons.close, size: 14, color: Colors.white),
+                                            child: const Icon(
+                                              Icons.close,
+                                              size: 14,
+                                              color: Colors.white,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -607,10 +666,15 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                                         bottom: 0,
                                         left: 0,
                                         child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 2,
+                                          ),
                                           decoration: BoxDecoration(
                                             color: Colors.black54,
-                                            borderRadius: BorderRadius.circular(4),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
                                           ),
                                           child: Text(
                                             '${index + 1}',
@@ -635,7 +699,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                   Row(
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.camera_alt_outlined, color: Colors.white70),
+                        icon: const Icon(
+                          Icons.camera_alt_outlined,
+                          color: Colors.white70,
+                        ),
                         onPressed: _showImageSourceActionSheet,
                       ),
                       Expanded(
@@ -643,7 +710,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                           controller: _inputController,
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
-                            hintText: _isLoading ? _loadingText : '输入问题或上传单据...',
+                            hintText: _isLoading
+                                ? _loadingText
+                                : '输入问题或上传单据...',
                             hintStyle: const TextStyle(color: Colors.white38),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.05),
@@ -662,7 +731,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                       ),
                       const SizedBox(width: 12),
                       IconButton(
-                        icon: const Icon(Icons.send, color: AppTheme.electricBlue),
+                        icon: const Icon(
+                          Icons.send,
+                          color: AppTheme.electricBlue,
+                        ),
                         onPressed: _isLoading ? null : _sendMessage,
                       ),
                     ],
@@ -686,15 +758,16 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   /// 使用正则表达式提取所有 JSON 块，避免散乱 JSON 解析失败
   List<Map<String, dynamic>> _parseGiftDataList(String content) {
     final List<Map<String, dynamic>> result = [];
-    
+
     // 先尝试整体解析（数组或单个对象）
     try {
       final cleaned = AIService.cleanJsonString(content);
       final decoded = json.decode(cleaned);
-      
+
       if (decoded is List) {
         for (final item in decoded) {
-          if (item is Map && _isValidGiftItem(Map<String, dynamic>.from(item))) {
+          if (item is Map &&
+              _isValidGiftItem(Map<String, dynamic>.from(item))) {
             result.add(Map<String, dynamic>.from(item));
           }
         }
@@ -708,16 +781,16 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     } catch (_) {
       // 整体解析失败，继续使用正则提取
     }
-    
+
     // 使用正则表达式提取所有 JSON 对象块
     // 使用 \{[\s\S]*?\} 匹配 {...} 格式，支持多行散乱数据
     final jsonRegex = RegExp(r'\{[\s\S]*?\}', multiLine: true);
     final matches = jsonRegex.allMatches(content);
-    
+
     for (final match in matches) {
       final jsonStr = match.group(0);
       if (jsonStr == null) continue;
-      
+
       try {
         final cleaned = AIService.cleanJsonString(jsonStr);
         final item = json.decode(cleaned);
@@ -728,7 +801,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         // 忽略解析失败的块
       }
     }
-    
+
     return result;
   }
 
@@ -795,6 +868,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     final rawImagePaths = msg['imagePaths'] as List<dynamic>?;
     final validImagePaths = _getValidImagePaths(rawImagePaths);
     final bool hasValidSingleImage = _isImageFileValid(imagePath);
+    final toolTrace = (msg['toolTrace'] as List<dynamic>? ?? const [])
+        .map((tool) => tool.toString())
+        .toList();
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -804,14 +880,54 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           maxWidth: MediaQuery.of(context).size.width * 0.85,
         ),
         child: Column(
-          crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isUser
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (!isUser && toolTrace.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: toolTrace
+                      .map(
+                        (tool) => Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.electricBlue.withValues(
+                              alpha: 0.12,
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.electricBlue.withValues(
+                                alpha: 0.3,
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            '已调用 · ${FamilyAgentTools.displayName(tool)}',
+                            style: const TextStyle(
+                              color: AppTheme.electricBlue,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
             // 多图消息
             if (validImagePaths.isNotEmpty)
               _buildMultiImagePreview(validImagePaths, isUser: isUser),
             // 单图消息（兼容旧数据）
-            if (hasValidSingleImage && rawImagePaths == null && imagePath != null)
+            if (hasValidSingleImage &&
+                rawImagePaths == null &&
+                imagePath != null)
               GestureDetector(
                 onTap: () => _showFullScreenImage(imagePath),
                 child: Container(
@@ -826,10 +942,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      File(imagePath),
-                      fit: BoxFit.cover,
-                    ),
+                    child: Image.file(File(imagePath), fit: BoxFit.cover),
                   ),
                 ),
               ),
@@ -839,7 +952,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
               GestureDetector(
                 onLongPress: () => _copyToClipboard(content),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: isUser
                         ? AppTheme.electricBlue.withValues(alpha: 0.2)
@@ -860,7 +976,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                       ? _buildJsonPreview(content)
                       : SelectableText(
                           content,
-                          style: const TextStyle(color: Colors.white, height: 1.5),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            height: 1.5,
+                          ),
                           contextMenuBuilder: (context, editableTextState) {
                             return AdaptiveTextSelectionToolbar.editableText(
                               editableTextState: editableTextState,
@@ -871,8 +990,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
               ),
 
             // JSON 数据同步卡片
-            if (isJsonData && !isUser)
-              _buildSyncCard(content),
+            if (isJsonData && !isUser) _buildSyncCard(content),
 
             const SizedBox(height: 8),
           ],
@@ -912,7 +1030,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         maxHeight: 120,
       ),
       child: Column(
-        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           // 图片数量标签
@@ -920,10 +1040,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
               '$imageCount 张图片',
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-              ),
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
             ),
           ),
           // 图片网格
@@ -934,7 +1051,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
               reverse: isUser,
               itemCount: paths.length,
               itemBuilder: (context, index) {
-                final int displayIndex = isUser ? (paths.length - 1 - index) : index;
+                final int displayIndex = isUser
+                    ? (paths.length - 1 - index)
+                    : index;
                 return GestureDetector(
                   onTap: () => _showFullScreenImage(paths[displayIndex]),
                   child: Container(
@@ -960,7 +1079,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                             bottom: 0,
                             left: 0,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.black54,
                                 borderRadius: BorderRadius.circular(4),
@@ -994,7 +1116,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     final items = _parseGiftDataList(jsonContent);
     final knownCount = _countKnownMembers(items);
     final unknownCount = items.length - knownCount;
-    
+
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(12),
@@ -1004,10 +1126,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         border: Border.all(color: Colors.white10),
       ),
       // 明确约束宽度
-      constraints: BoxConstraints(
-        minWidth: 200,
-        maxWidth: 300,
-      ),
+      constraints: BoxConstraints(minWidth: 200, maxWidth: 300),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1015,7 +1134,11 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           // 顶部提示 - 显示统计信息
           Row(
             children: [
-              Icon(Icons.analytics_outlined, color: AppTheme.electricBlue, size: 18),
+              Icon(
+                Icons.analytics_outlined,
+                color: AppTheme.electricBlue,
+                size: 18,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: RichText(
@@ -1025,14 +1148,20 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                       TextSpan(text: '检测到 '),
                       TextSpan(
                         text: '$knownCount',
-                        style: TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          color: AppTheme.electricBlue,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       TextSpan(text: ' 条已知成员记录'),
                       if (unknownCount > 0) ...[
                         const TextSpan(text: '，'),
                         TextSpan(
                           text: '$unknownCount',
-                          style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const TextSpan(text: ' 条新成员已跳过'),
                       ],
@@ -1043,12 +1172,14 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             ],
           ),
           const SizedBox(height: 12),
-          
+
           // 操作按钮
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: knownCount > 0 ? () => _handleImport(jsonContent) : null,
+              onPressed: knownCount > 0
+                  ? () => _handleImport(jsonContent)
+                  : null,
               icon: const Icon(Icons.download, size: 16),
               label: Text(knownCount > 0 ? '一键导入' : '无已知成员'),
               style: ElevatedButton.styleFrom(
@@ -1067,12 +1198,9 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   /// 构建 JSON 预览显示（支持多条记录）
   Widget _buildJsonPreview(String jsonContent) {
     final items = _parseGiftDataList(jsonContent);
-    
+
     if (items.isEmpty) {
-      return const Text(
-        '识别结果为空',
-        style: TextStyle(color: Colors.white54),
-      );
+      return const Text('识别结果为空', style: TextStyle(color: Colors.white54));
     }
 
     // 多条记录时显示列表（限制最大高度）
@@ -1083,11 +1211,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
         children: [
           Row(
             children: [
-              Icon(
-                Icons.receipt_long,
-                color: AppTheme.electricBlue,
-                size: 18,
-              ),
+              Icon(Icons.receipt_long, color: AppTheme.electricBlue, size: 18),
               const SizedBox(width: 8),
               Text(
                 '识别结果（${items.length}条）',
@@ -1101,12 +1225,11 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           const SizedBox(height: 12),
           // 使用 ListView 约束高度，支持滚动查看多条记录
           ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxHeight: 200,
-            ),
+            constraints: const BoxConstraints(maxHeight: 200),
             child: ListView.builder(
               itemCount: items.length,
-              itemBuilder: (context, index) => _buildGiftItemSummary(items[index]),
+              itemBuilder: (context, index) =>
+                  _buildGiftItemSummary(items[index]),
             ),
           ),
         ],
@@ -1124,7 +1247,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     final event = data['event']?.toString() ?? '未知事件';
     final date = data['date']?.toString() ?? '';
     final isNew = data['is_new'] == true;
-    
+
     // 查找匹配成员
     String? matchedId = data['matched_id']?.toString();
     Person? matchedPerson;
@@ -1145,11 +1268,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
       children: [
         Row(
           children: [
-            Icon(
-              Icons.receipt_long,
-              color: AppTheme.electricBlue,
-              size: 18,
-            ),
+            Icon(Icons.receipt_long, color: AppTheme.electricBlue, size: 18),
             const SizedBox(width: 8),
             Text(
               '识别结果',
@@ -1175,9 +1294,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
             ),
             const SizedBox(width: 4),
             Text(
-              isNew 
-                  ? '新成员（需手动添加）'
-                  : '匹配: ${matchedPerson?.name ?? "未匹配"}',
+              isNew ? '新成员（需手动添加）' : '匹配: ${matchedPerson?.name ?? "未匹配"}',
               style: TextStyle(
                 color: isNew ? Colors.orange : AppTheme.electricBlue,
                 fontSize: 12,
@@ -1196,14 +1313,14 @@ class _AIAssistantViewState extends State<AIAssistantView> {
     final event = data['event']?.toString() ?? '';
     final isNew = data['is_new'] == true;
     final matchedId = data['matched_id']?.toString();
-    
+
     // 查找匹配成员名称
     String matchedName = '';
     if (matchedId != null && matchedId.isNotEmpty) {
       final person = widget.controller.getPerson(matchedId);
       if (person != null) matchedName = person.name;
     }
-    
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -1228,7 +1345,10 @@ class _AIAssistantViewState extends State<AIAssistantView> {
                   const TextSpan(text: ' 给了 '),
                   TextSpan(
                     text: '¥${amount.toStringAsFixed(0)}',
-                    style: TextStyle(color: AppTheme.electricBlue, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: AppTheme.electricBlue,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   if (event.isNotEmpty) ...[
                     const TextSpan(text: '（'),
@@ -1243,7 +1363,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: isNew 
+              color: isNew
                   ? Colors.orange.withValues(alpha: 0.2)
                   : AppTheme.electricBlue.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(4),

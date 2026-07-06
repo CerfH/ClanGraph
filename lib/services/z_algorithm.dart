@@ -31,11 +31,11 @@ class NodeLayoutData {
   final Person person;
   final Offset center;
   final double radius;
-  final int tier;           // 层级: 1, 2, 3
-  final int generation;     // 代数
-  final double angle;       // 极坐标角度
+  final int tier; // 层级: 1, 2, 3
+  final int generation; // 代数
+  final double angle; // 极坐标角度
   final double orbitRadius; // 极坐标半径
-  final bool isInLaw;       // 是否为姻亲
+  final bool isInLaw; // 是否为姻亲
 
   const NodeLayoutData({
     required this.person,
@@ -59,10 +59,10 @@ class NodeLayoutData {
 class TierConfig {
   /// T1 (38dp): 我、父母、配偶、亲兄妹、子女
   static const double radiusT1 = 38.0;
-  
-  /// T2 (28dp): 祖父母、姑/舅、表/堂亲  
+
+  /// T2 (28dp): 祖父母、姑/舅、表/堂亲
   static const double radiusT2 = 28.0;
-  
+
   /// T3 (18dp): 其他
   static const double radiusT3 = 18.0;
 
@@ -84,20 +84,28 @@ class TierConfig {
   /// 根据层级获取半径
   static double getRadius(int tier) {
     switch (tier) {
-      case 1: return radiusT1;
-      case 2: return radiusT2;
-      case 3: return radiusT3;
-      default: return radiusT3;
+      case 1:
+        return radiusT1;
+      case 2:
+        return radiusT2;
+      case 3:
+        return radiusT3;
+      default:
+        return radiusT3;
     }
   }
 
   /// 根据层级获取半径范围
   static (double min, double max) getRingRange(int tier) {
     switch (tier) {
-      case 1: return (ring1Min, ring1Max);
-      case 2: return (ring2Min, ring2Max);
-      case 3: return (ring3Min, ring3Max);
-      default: return (ring3Min, ring3Max);
+      case 1:
+        return (ring1Min, ring1Max);
+      case 2:
+        return (ring2Min, ring2Max);
+      case 3:
+        return (ring3Min, ring3Max);
+      default:
+        return (ring3Min, ring3Max);
     }
   }
 }
@@ -108,8 +116,8 @@ class TieredRippleLayout {
 
   TieredRippleLayout({int? seed}) : _random = math.Random(seed);
 
- /// 计算节点层级 (T1, T2, T3)
-  /// 
+  /// 计算节点层级 (T1, T2, T3)
+  ///
   /// T1 (38dp): 我、父母、配偶、亲兄妹、子女
   /// T2 (28dp): 祖父母、姑/舅、表/堂亲
   /// T3 (18dp): 其他
@@ -122,10 +130,66 @@ class TieredRippleLayout {
     final root = byId[rootId];
     if (root == null) return 3;
 
-    // 【核心工具】严格判定两人是否为亲/同父异母/同母异父兄弟姐妹（至少共享一个父母）
+    // 历史数据中关系指针不一定完全双向。布局必须同时读取正向和反向
+    // 引用，否则切换中心后，近亲可能因为新中心缺少 children/parents
+    // 回写而被误判为 T3。
+    Set<String> spouseIds(Person value) {
+      final result = <String>{};
+      if (value.spouse != null && value.spouse!.isNotEmpty) {
+        result.add(value.spouse!);
+      }
+      if (value.spouseId != null && value.spouseId!.isNotEmpty) {
+        result.add(value.spouseId!);
+      }
+      for (final candidate in byId.values) {
+        if (candidate.spouse == value.id || candidate.spouseId == value.id) {
+          result.add(candidate.id);
+        }
+      }
+      return result.where(byId.containsKey).toSet();
+    }
+
+    Set<String> parentIds(Person value) {
+      final result = <String>{...value.parents};
+      for (final candidate in byId.values) {
+        if (candidate.children.contains(value.id)) result.add(candidate.id);
+      }
+
+      // 当前产品把明确配偶及其子女视为同一个家庭单元。
+      // 已记录父母的配偶也应作为父母参与亲疏布局。
+      final explicitParents = result.toList();
+      for (final parentId in explicitParents) {
+        final parent = byId[parentId];
+        if (parent != null) result.addAll(spouseIds(parent));
+      }
+      return result.where(byId.containsKey).toSet();
+    }
+
+    Set<String> childIds(Person value) {
+      final result = <String>{...value.children};
+      for (final candidate in byId.values) {
+        if (candidate.parents.contains(value.id)) result.add(candidate.id);
+      }
+
+      // 与图谱连线和详情面板保持一致：配偶名下的子女按共同子女处理。
+      for (final spouseId in spouseIds(value)) {
+        final spouse = byId[spouseId];
+        if (spouse == null) continue;
+        result.addAll(spouse.children);
+        for (final candidate in byId.values) {
+          if (candidate.parents.contains(spouseId)) result.add(candidate.id);
+        }
+      }
+      return result.where(byId.containsKey).toSet();
+    }
+
+    final rootParents = parentIds(root);
+    final rootChildren = childIds(root);
+
+    // 严格判定亲/同父异母/同母异父兄弟姐妹（至少共享一个父母）。
     bool isSibling(Person a, Person b) {
       if (a.id == b.id) return false;
-      return a.parents.any((p) => b.parents.contains(p));
+      return parentIds(a).intersection(parentIds(b)).isNotEmpty;
     }
 
     // ==========================================
@@ -135,8 +199,10 @@ class TieredRippleLayout {
     bool isT2Blood = false;
 
     // 1. 判断 T1 血缘 (父母、子女、亲兄妹)
-    if (root.parents.contains(person.id) ||
-        root.children.contains(person.id) ||
+    if (rootParents.contains(person.id) ||
+        rootChildren.contains(person.id) ||
+        parentIds(person).contains(root.id) ||
+        childIds(person).contains(root.id) ||
         isSibling(root, person)) {
       isT1Blood = true;
     }
@@ -144,24 +210,27 @@ class TieredRippleLayout {
     // 2. 判断 T2 血缘 (祖父母、亲姑舅、亲表堂兄妹)
     if (!isT1Blood) {
       // 2.1 祖父母
-      for (final pId in root.parents) {
-        if (byId[pId]?.parents.contains(person.id) ?? false) isT2Blood = true;
+      for (final pId in rootParents) {
+        final parent = byId[pId];
+        if (parent != null && parentIds(parent).contains(person.id)) {
+          isT2Blood = true;
+        }
       }
-      
+
       // 2.2 亲姑舅 (必须是 root 父母的亲兄妹)
       if (!isT2Blood) {
-        for (final pId in root.parents) {
+        for (final pId in rootParents) {
           final parent = byId[pId];
           if (parent != null && isSibling(parent, person)) isT2Blood = true;
         }
       }
-      
+
       // 2.3 亲表/堂兄妹 (重点修复：必须是 person 的父母与 root 的父母是亲兄妹)
       if (!isT2Blood) {
-        for (final myParentId in person.parents) {
+        for (final myParentId in parentIds(person)) {
           final myParent = byId[myParentId];
           if (myParent != null) {
-            for (final rParentId in root.parents) {
+            for (final rParentId in rootParents) {
               final rParent = byId[rParentId];
               if (rParent != null && isSibling(myParent, rParent)) {
                 isT2Blood = true;
@@ -182,32 +251,42 @@ class TieredRippleLayout {
     // 第二步：终极防漏与寄生逻辑 (配偶继承)
     // ==========================================
     // 如果走到这里，说明该节点在血缘上是个 T3 (外人)。我们来看配偶能不能带他升舱！
-    if (root.spouse == person.id) return 1; // 我的配偶，直接 T1
+    if (spouseIds(root).contains(person.id) ||
+        spouseIds(person).contains(root.id)) {
+      return 1;
+    }
 
-    if (person.spouse != null && person.spouse!.isNotEmpty) {
-      final spouse = byId[person.spouse!];
+    for (final spouseId in spouseIds(person)) {
+      final spouse = byId[spouseId];
       if (spouse != null) {
         // 重新对配偶做一次【纯血缘】判定
-        bool spouseIsT1Blood = root.parents.contains(spouse.id) ||
-                               root.children.contains(spouse.id) ||
-                               isSibling(root, spouse);
+        bool spouseIsT1Blood =
+            rootParents.contains(spouse.id) ||
+            rootChildren.contains(spouse.id) ||
+            isSibling(root, spouse);
         if (spouseIsT1Blood) return 1; // 比如嫂子继承哥哥的 T1
 
         bool spouseIsT2Blood = false;
         // 配偶是祖父母？
-        for (final pId in root.parents) {
-          if (byId[pId]?.parents.contains(spouse.id) ?? false) spouseIsT2Blood = true;
+        for (final pId in rootParents) {
           final parent = byId[pId];
-          if (parent != null && isSibling(parent, spouse)) spouseIsT2Blood = true;
+          if (parent != null && parentIds(parent).contains(spouse.id)) {
+            spouseIsT2Blood = true;
+          }
+          if (parent != null && isSibling(parent, spouse)) {
+            spouseIsT2Blood = true;
+          }
         }
         // 配偶是亲表堂兄妹？
         if (!spouseIsT2Blood) {
-          for (final spParentId in spouse.parents) {
+          for (final spParentId in parentIds(spouse)) {
             final spParent = byId[spParentId];
             if (spParent != null) {
-              for (final rParentId in root.parents) {
+              for (final rParentId in rootParents) {
                 final rParent = byId[rParentId];
-                if (rParent != null && isSibling(spParent, rParent)) spouseIsT2Blood = true;
+                if (rParent != null && isSibling(spParent, rParent)) {
+                  spouseIsT2Blood = true;
+                }
               }
             }
           }
@@ -229,7 +308,11 @@ class TieredRippleLayout {
   }
 
   /// 硬核防重叠检测
-  bool _checkCollision(Offset candidate, double radius, List<NodeLayoutData> placed) {
+  bool _checkCollision(
+    Offset candidate,
+    double radius,
+    List<NodeLayoutData> placed,
+  ) {
     for (final node in placed) {
       final distance = (candidate - node.center).distance;
       final minDistance = radius + node.radius + TierConfig.collisionGap;
@@ -268,9 +351,15 @@ class TieredRippleLayout {
     for (final person in allPeople) {
       final tier = _calculateTier(person, byId, rootId);
       switch (tier) {
-        case 1: tier1Nodes.add(person); break;
-        case 2: tier2Nodes.add(person); break;
-        case 3: tier3Nodes.add(person); break;
+        case 1:
+          tier1Nodes.add(person);
+          break;
+        case 2:
+          tier2Nodes.add(person);
+          break;
+        case 3:
+          tier3Nodes.add(person);
+          break;
       }
     }
 
@@ -278,16 +367,18 @@ class TieredRippleLayout {
     final results = <NodeLayoutData>[];
 
     // Root 固定在中心
-    results.add(NodeLayoutData(
-      person: byId[rootId]!,
-      center: canvasCenter,
-      radius: TierConfig.radiusT1,
-      tier: 1,
-      generation: generationOf[rootId] ?? 0,
-      angle: 0,
-      orbitRadius: 0,
-      isInLaw: false,
-    ));
+    results.add(
+      NodeLayoutData(
+        person: byId[rootId]!,
+        center: canvasCenter,
+        radius: TierConfig.radiusT1,
+        tier: 1,
+        generation: generationOf[rootId] ?? 0,
+        angle: 0,
+        orbitRadius: 0,
+        isInLaw: false,
+      ),
+    );
 
     // 放置 T1 节点 (第一环: 100-140dp)
     _placeTierNodes(
@@ -345,9 +436,10 @@ class TieredRippleLayout {
 
       const maxAttempts = 100;
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
-        final orbitRadius = minRadius + _random.nextDouble() * (maxRadius - minRadius);
+        final orbitRadius =
+            minRadius + _random.nextDouble() * (maxRadius - minRadius);
         final angle = _random.nextDouble() * 2 * math.pi;
-        
+
         final candidate = Offset(
           canvasCenter.dx + orbitRadius * math.cos(angle),
           canvasCenter.dy + orbitRadius * math.sin(angle),
@@ -366,7 +458,7 @@ class TieredRippleLayout {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
           final orbitRadius = maxRadius + 20 + _random.nextDouble() * 60;
           final angle = _random.nextDouble() * 2 * math.pi;
-          
+
           final candidate = Offset(
             canvasCenter.dx + orbitRadius * math.cos(angle),
             canvasCenter.dy + orbitRadius * math.sin(angle),
@@ -389,16 +481,18 @@ class TieredRippleLayout {
       finalAngle ??= 0;
       finalOrbitRadius ??= (minRadius + maxRadius) / 2;
 
-      placed.add(NodeLayoutData(
-        person: person,
-        center: finalPosition,
-        radius: radius,
-        tier: tier,
-        generation: generationOf[person.id] ?? 0,
-        angle: finalAngle,
-        orbitRadius: finalOrbitRadius,
-        isInLaw: _isInLaw(person, placed),
-      ));
+      placed.add(
+        NodeLayoutData(
+          person: person,
+          center: finalPosition,
+          radius: radius,
+          tier: tier,
+          generation: generationOf[person.id] ?? 0,
+          angle: finalAngle,
+          orbitRadius: finalOrbitRadius,
+          isInLaw: _isInLaw(person, placed),
+        ),
+      );
     }
   }
 

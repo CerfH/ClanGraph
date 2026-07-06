@@ -7,6 +7,6 @@ void main() {
     await tester.pumpWidget(const ClanGraphApp());
 
     // Verify that our app starts.
-    expect(find.text('CLAN GRAPH'), findsOneWidget);
+    expect(find.text('家族智慧图谱'), findsOneWidget);
   });
 }
