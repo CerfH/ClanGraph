@@ -27,12 +27,21 @@ class AIService {
   /// Web Demo 运行时 Key（用户自己输入），优先级高于 .env
   static String? runtimeApiKey;
 
-  // 智谱 API 配置 - 优先使用运行时 Key，否则从 .env 获取
-  String get _zhipuApiKey => runtimeApiKey ?? dotenv.env['ZHIPU_API_KEY'] ?? '';
+  /// 安全读取环境变量（Web 端 dotenv 可能未初始化）
+  String _env(String key, String fallback) {
+    if (runtimeApiKey != null && key == 'ZHIPU_API_KEY') return runtimeApiKey!;
+    try {
+      return dotenv.env[key] ?? fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  String get _zhipuApiKey => _env('ZHIPU_API_KEY', '');
   String get _zhipuBaseUrl =>
-      dotenv.env['ZHIPU_BASE_URL'] ?? 'https://open.bigmodel.cn/api/paas/v4/';
-  String get _textModel => dotenv.env['ZHIPU_MODEL_TEXT'] ?? 'glm-4.5-air';
-  String get _visionModel => dotenv.env['ZHIPU_MODEL_VISION'] ?? 'glm-4.6v';
+      _env('ZHIPU_BASE_URL', 'https://open.bigmodel.cn/api/paas/v4/');
+  String get _textModel => _env('ZHIPU_MODEL_TEXT', 'glm-4.5-air');
+  String get _visionModel => _env('ZHIPU_MODEL_VISION', 'glm-4.6v');
 
   // Lazy getter for Zhipu Dio
   Dio get _dio {
