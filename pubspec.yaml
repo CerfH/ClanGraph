@@ -1,5 +1,5 @@
 name: clangraph
-description: "A new Flutter project."
+description: "智能家族关系管理 × 人情洞察 Agent — 以图谱为骨架、AI 为大脑的中国乡土社交管家。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
