@@ -32,6 +32,7 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   final ImagePicker _picker = ImagePicker();
 
   bool _isLoading = false;
+  bool _hasKey = false;
   final List<File> _selectedImages = []; // 多图选择列表
   String _loadingText = '正在思考中...';
 
@@ -40,7 +41,88 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   @override
   void initState() {
     super.initState();
+    _hasKey = _keyIsValid();
     _loadChatHistory();
+  }
+
+  bool _keyIsValid() {
+    final key = AIService.runtimeApiKey ?? '';
+    if (key.isEmpty) return false;
+    if (key.contains('placeholder') || key.contains('your_api_key')) return false;
+    return true;
+  }
+
+  Future<void> _showKeyDialog() async {
+    final ctrl = TextEditingController(text: AIService.runtimeApiKey ?? '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surfaceGrey,
+        title: const Row(
+          children: [
+            Icon(Icons.key, color: AppTheme.electricBlue, size: 20),
+            SizedBox(width: 8),
+            Text('配置 API Key', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '请输入智谱 API Key（仅保存在当前页面）：',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: '粘贴 API Key...',
+                hintStyle: const TextStyle(color: Colors.white30),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.05),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.white24),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.white24),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppTheme.electricBlue),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '免费申请：https://open.bigmodel.cn',
+              style: TextStyle(color: AppTheme.electricBlue, fontSize: 11),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('保存', style: TextStyle(color: AppTheme.electricBlue)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && ctrl.text.trim().isNotEmpty) {
+      setState(() {
+        AIService.runtimeApiKey = ctrl.text.trim();
+        _hasKey = _keyIsValid();
+      });
+    }
+    ctrl.dispose();
   }
 
   @override
@@ -234,6 +316,12 @@ class _AIAssistantViewState extends State<AIAssistantView> {
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     if (text.isEmpty && _selectedImages.isEmpty) return;
+
+    // Web Demo：未配置 Key 时弹出输入框
+    if (!_hasKey) {
+      await _showKeyDialog();
+      if (!_hasKey) return;
+    }
 
     // 添加用户消息
     final imagesToSend = List<File>.from(_selectedImages);
@@ -536,6 +624,15 @@ class _AIAssistantViewState extends State<AIAssistantView> {
           ),
           Row(
             children: [
+              IconButton(
+                icon: Icon(
+                  _hasKey ? Icons.vpn_key : Icons.vpn_key_off,
+                  color: _hasKey ? AppTheme.electricBlue : Colors.white30,
+                  size: 18,
+                ),
+                onPressed: _showKeyDialog,
+                tooltip: _hasKey ? 'API Key 已配置' : '配置 API Key',
+              ),
               IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.white54),
                 onPressed: _messages.isEmpty ? null : _clearChatHistory,

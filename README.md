@@ -9,7 +9,7 @@
 [![Platform](https://img.shields.io/badge/Platform-iOS_|_Android_|_macOS_|_Windows_|_Linux_|_Web-lightgrey?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
-[🌐 在线体验](https://cerfh.github.io/ClanGraph/) · [📥 下载代码](https://github.com/CerfH/ClanGraph)
+[🌐 在线体验](https://cerfh.github.io/ClanGraph/) · [📥 下载代码](https://github.com/CerfH/ClanGraph/archive/refs/heads/main.zip)
 
 </div>
 

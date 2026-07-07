@@ -582,6 +582,11 @@ class FamilyController extends ChangeNotifier {
     final person = _people[id];
     if (person == null) return;
 
+    // 删除中心人物时，自动回退到 root
+    if (_mainPersonId == id) {
+      _mainPersonId = 'root';
+    }
+
     for (var parentId in person.parents) {
       final parent = _people[parentId];
       if (parent != null) {
